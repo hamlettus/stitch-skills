@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fonts, space } from '@/theme';
 import { ScreenHeader } from '@/components/molecules/ScreenHeader';
 import { DeckCard } from '@/components/molecules/DeckCard';
+import { CrossfaderSlider } from '@/components/molecules/CrossfaderSlider';
 import { SamplerGrid } from '@/components/organisms/SamplerGrid';
 import { SectionLabel } from '@/components/atoms/SectionLabel';
 import { useDeck } from '@/hooks/useDeck';
@@ -14,9 +15,25 @@ export interface StudioScreenProps {
   readonly setName?: string;
 }
 
-export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Untitled Set · 2 layers' }) => {
-  const deck = useDeck();
+/** DJ-style linear crossfade: center = both full, sides fade the opposite deck. */
+function crossfadeVolumes(cf: number): [number, number] {
+  const volA = cf <= 0.5 ? 1.0 : (1.0 - cf) * 2;
+  const volB = cf >= 0.5 ? 1.0 : cf * 2;
+  return [volA, volB];
+}
+
+export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set' }) => {
+  const deckA = useDeck();
+  const deckB = useDeck();
   const { trigger } = useSampler();
+  const [crossfade, setCrossfade] = useState(0.5);
+
+  // Apply crossfader volumes whenever the position changes
+  useEffect(() => {
+    const [volA, volB] = crossfadeVolumes(crossfade);
+    void deckA.setVolume(volA);
+    void deckB.setVolume(volB);
+  }, [crossfade]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onPad = (pad: PadDef) => {
     void trigger(pad.sound);
@@ -25,27 +42,41 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Untitled 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader eyebrow={setName} title="Studio" rightGlyph="●" rightColor={colors.energy} rightLabel="Record" />
+        <ScreenHeader
+          eyebrow={setName}
+          title="Studio"
+          rightGlyph="●"
+          rightColor={colors.energy}
+          rightLabel="Record"
+        />
 
-        <DeckCard label="Deck A" title="Neon Tide" musicKey="8A" bpm={124} seed={7} played={deck.playing ? 0.55 : 0.4} />
-        <DeckCard label="Deck B" title="Midnight Protocol" musicKey="9A" bpm={126} note="+1 key" seed={19} played={deck.playing ? 0.5 : 0.4} />
+        <DeckCard
+          label="Deck A"
+          track={deckA.track}
+          playing={deckA.playing}
+          positionRatio={deckA.positionRatio}
+          durationMs={deckA.durationMs}
+          onLoad={() => void deckA.loadFile()}
+          onToggle={() => void deckA.toggle()}
+          seed={7}
+        />
 
-        <View style={styles.transport}>
-          <Pressable style={styles.tbtn} accessibilityRole="button" accessibilityLabel="Previous">
-            <Text style={styles.tglyph}>⏮</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.tbtn, styles.play]}
-            onPress={() => void deck.toggle()}
-            accessibilityRole="button"
-            accessibilityLabel={deck.playing ? 'Pause' : 'Play'}
-          >
-            <Text style={styles.playGlyph}>{deck.playing ? '⏸' : '▶'}</Text>
-          </Pressable>
-          <Pressable style={styles.tbtn} accessibilityRole="button" accessibilityLabel="Record">
-            <Text style={[styles.tglyph, styles.recGlyph]}>●</Text>
-          </Pressable>
+        {/* Crossfader */}
+        <View style={styles.crossfaderRow}>
+          <Text style={styles.crossfaderLabel}>CROSSFADER</Text>
+          <CrossfaderSlider value={crossfade} onChange={setCrossfade} />
         </View>
+
+        <DeckCard
+          label="Deck B"
+          track={deckB.track}
+          playing={deckB.playing}
+          positionRatio={deckB.positionRatio}
+          durationMs={deckB.durationMs}
+          onLoad={() => void deckB.loadFile()}
+          onToggle={() => void deckB.toggle()}
+          seed={19}
+        />
 
         <SectionLabel>Sampler · tap to trigger</SectionLabel>
         <SamplerGrid onTrigger={onPad} />
@@ -57,31 +88,15 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Untitled 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   content: { paddingHorizontal: 18, paddingBottom: 40 },
-  transport: {
-    flexDirection: 'row',
+  crossfaderRow: {
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 22,
-    marginVertical: space.xl,
+    marginBottom: space.lg,
   },
-  tbtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
+  crossfaderLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.muted2,
+    letterSpacing: 1.5,
+    marginBottom: 2,
   },
-  play: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: colors.key,
-    borderWidth: 0,
-  },
-  tglyph: { fontSize: 19, color: colors.text },
-  recGlyph: { color: colors.energy },
-  playGlyph: { fontSize: 26, color: colors.onAccent },
 });

@@ -26,3 +26,10 @@ export interface PadDef {
   readonly accent: 'key' | 'energy' | 'violet';
   readonly sound: 'kick' | 'snare' | 'hat' | 'clap' | 'tom';
 }
+
+/** A track loaded onto a deck from the device's file system. */
+export interface LoadedTrack {
+  readonly uri: string;
+  /** Display name, typically the file name without extension. */
+  readonly name: string;
+}
