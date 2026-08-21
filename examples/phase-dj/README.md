@@ -38,20 +38,49 @@ Committed dark "booth" palette. Two signal colors carry meaning everywhere:
 collaboration**. Display type is Chakra Petch; all numbers (BPM, key, time) are
 set in Space Mono, tabular. The Camelot wheel carries the full 12-hue spectrum.
 
-## Suggested build path (next steps)
+## The real app — `app/`
 
-This prototype is design-only. A real iOS build would layer on:
+`app/` is a working **Expo (React Native + TypeScript)** build of PHASE that runs
+on a real iPhone. It follows this repo's `stitch::react-native` architecture:
+theme tokens in `src/theme.ts`, atomic components (`atoms/` → `molecules/` →
+`organisms/`), typed `Props` interfaces on every component, mock data isolated in
+`src/data/`, logic in `src/hooks/`, and React Navigation for the tabs. Every
+component passes the skill's `scripts/validate.js`, and `tsc --noEmit` is clean.
 
-1. **Audio engine** — AVAudioEngine for playback, time-stretch/pitch (key-lock),
-   and dual-deck crossfade.
-2. **Analysis** — on-device key/BPM/energy detection (e.g. an aubio/Essentia-style
-   pipeline or a Core ML model) run on import.
-3. **Library** — MediaPlayer / Files import, local metadata store.
-4. **Backend** — accounts, the social feed, mix hosting, and remix lineage.
+### What actually works right now
 
-React Native (Expo) is a viable path too and lines up with this repo's
-`stitch::react-native` skill for turning these screens into components.
+- **Navigation** — all five tabs (Crate · Wheel · Studio · Feed · You) render real data.
+- **Camelot wheel** — tap any of the 24 keys; compatible keys light up and the
+  match list + track suggestions recompute live (`src/hooks/useHarmonicMatches.ts`).
+- **Sound** — the Studio **makes real audio**. The 12 sampler pads trigger
+  synthesized drum one-shots (`expo-av` + haptics), and the play button loops a
+  124 BPM drum pattern. Audio is generated, bundled WAVs in `app/assets/audio/`.
+- **Crate** — filter chips, search field, per-track waveform, Camelot badge, BPM,
+  and energy meter.
+
+### Run it on your iPhone (no App Store needed)
+
+1. Install the **Expo Go** app from the App Store on your iPhone.
+2. On your computer:
+   ```bash
+   cd examples/phase-dj/app
+   npm install
+   npx expo start
+   ```
+3. Scan the QR code in the terminal with your iPhone camera → it opens in Expo Go.
+
+> Pinned to Expo SDK 51. If your Expo Go is on a newer SDK, run
+> `npx expo install expo@latest && npx expo install --fix` to realign versions.
+
+### Still to build (staged)
+
+1. **Real track audio** — import your own files (MediaLibrary / document picker)
+   and play them on the decks with time-stretch + key-lock crossfade.
+2. **On-device analysis** — real key / BPM / energy detection on import
+   (Essentia/aubio-style DSP or a Core ML model) instead of the mock metadata.
+3. **Backend** — accounts, the social feed, mix hosting, and remix lineage.
+4. **Recording & export** — capture a mix and publish it to the feed.
 
 ---
 
-Prototype generated with Google Stitch design skills.
+Prototype and app scaffolded with Google Stitch design skills.
