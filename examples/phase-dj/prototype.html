@@ -1,0 +1,542 @@
+<title>PHASE Booth</title>
+<meta name="description" content="Interactive iPhone prototype of PHASE — a harmonic-mixing DJ studio where Mixed In Key's key/BPM/energy analysis meets BandLab-style create-and-share.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Chakra+Petch:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap">
+<style>
+  /* ============ PHASE — committed dark club palette ============ */
+  :root{
+    --bg:#0A0B0F;
+    --bg-2:#0E1017;
+    --surface:#161922;
+    --surface-2:#1D2130;
+    --line:#262B3B;
+    --line-soft:#1E2230;
+    --text:#EDEFF5;
+    --muted:#868DA6;
+    --muted-2:#5C6178;
+    --key:#35E8D0;      /* harmonic / key */
+    --key-dim:#12463F;
+    --energy:#FF7A45;   /* energy / bpm */
+    --energy-dim:#4A2617;
+    --violet:#8B7BFF;
+    --radius:20px;
+    --tab-h:74px;
+    --ff-display:"Chakra Petch",-apple-system,system-ui,sans-serif;
+    --ff-body:"Archivo",-apple-system,system-ui,sans-serif;
+    --ff-mono:"Space Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(1200px 700px at 20% -10%, #16122b 0%, transparent 55%),
+      radial-gradient(900px 600px at 110% 10%, #06232120 0%, transparent 50%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--ff-body);
+    -webkit-font-smoothing:antialiased;
+    display:flex;align-items:center;justify-content:center;
+    min-height:100%;
+    padding:24px;
+    gap:52px;
+  }
+
+  /* ---- Desktop context copy (hidden on phones) ---- */
+  .pitch{max-width:340px;display:none}
+  .pitch .kicker{font-family:var(--ff-mono);font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--key)}
+  .pitch h1{font-family:var(--ff-display);font-weight:700;font-size:58px;line-height:.94;letter-spacing:-.01em;margin:14px 0 6px;text-wrap:balance}
+  .pitch h1 span{color:var(--muted-2)}
+  .pitch p{color:var(--muted);font-size:15px;line-height:1.6;margin-top:14px}
+  .pitch .legend{margin-top:26px;display:flex;flex-direction:column;gap:12px}
+  .pitch .legend div{display:flex;align-items:center;gap:12px;font-size:13.5px;color:var(--muted)}
+  .pitch .legend b{color:var(--text);font-weight:600}
+  .dot{width:11px;height:11px;border-radius:3px;flex:none}
+  @media(min-width:1024px){.pitch{display:block}}
+
+  /* ---- Device frame ---- */
+  .device{
+    width:390px;height:844px;flex:none;position:relative;
+    border-radius:54px;padding:13px;
+    background:linear-gradient(150deg,#20242f,#0c0d12);
+    box-shadow:0 0 0 2px #303648, 0 40px 90px -20px #000, inset 0 1px 1px #3a4155;
+  }
+  .screen-frame{
+    position:relative;width:100%;height:100%;
+    border-radius:42px;overflow:hidden;
+    background:var(--bg);
+    display:flex;flex-direction:column;
+  }
+  .notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:132px;height:30px;background:#000;border-radius:0 0 18px 18px;z-index:60}
+
+  /* ---- Status bar ---- */
+  .statusbar{height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;font-family:var(--ff-mono);font-size:13px;letter-spacing:.02em;color:var(--text);z-index:40}
+  .statusbar .sig{display:flex;gap:5px;align-items:center}
+  .statusbar .sig i{width:4px;height:11px;background:var(--text);border-radius:1px;display:inline-block;opacity:.9}
+  .statusbar .batt{width:24px;height:12px;border:1.5px solid var(--text);border-radius:3px;position:relative;opacity:.9}
+  .statusbar .batt::after{content:"";position:absolute;inset:2px;right:7px;background:var(--key);border-radius:1px}
+
+  /* ---- App body / scrolling ---- */
+  .app{flex:1;position:relative;overflow:hidden}
+  .screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:4px 18px calc(var(--tab-h) + 22px);opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .32s ease, transform .32s ease;scrollbar-width:none}
+  .screen::-webkit-scrollbar{display:none}
+  .screen.active{opacity:1;transform:none;pointer-events:auto}
+
+  .topline{display:flex;align-items:center;justify-content:space-between;padding:8px 2px 18px}
+  .topline .eyebrow{font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--muted-2)}
+  .topline h2{font-family:var(--ff-display);font-weight:700;font-size:30px;line-height:1;letter-spacing:-.01em;margin-top:5px}
+  .icon-btn{width:40px;height:40px;border-radius:13px;background:var(--surface);border:1px solid var(--line);color:var(--text);display:grid;place-items:center;font-size:17px}
+
+  /* ---- Search + chips ---- */
+  .search{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:11px 14px;color:var(--muted);font-size:14px;margin-bottom:14px}
+  .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:16px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{flex:none;font-family:var(--ff-mono);font-size:11.5px;letter-spacing:.04em;padding:8px 13px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--muted);white-space:nowrap;cursor:pointer;transition:.18s}
+  .chip.on{background:var(--key);border-color:var(--key);color:#04120f;font-weight:700}
+
+  /* ---- Track row ---- */
+  .track{display:grid;grid-template-columns:44px 1fr auto;gap:13px;align-items:center;padding:12px 6px;border-bottom:1px solid var(--line-soft);cursor:pointer;transition:.18s}
+  .track:active{background:var(--surface)}
+  .cam{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;font-family:var(--ff-mono);font-weight:700;font-size:13px;color:#05100e;position:relative;flex:none}
+  .cam small{position:absolute;bottom:3px;right:5px;font-size:7px;opacity:.65;letter-spacing:0}
+  .t-mid{min-width:0}
+  .t-mid .nm{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .t-mid .ar{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .t-mid canvas{margin-top:7px;display:block;width:100%;height:20px}
+  .t-right{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+  .bpm{font-family:var(--ff-mono);font-size:14px;color:var(--text)}
+  .bpm b{color:var(--energy);font-weight:700}
+  .bpm span{color:var(--muted-2);font-size:10px;letter-spacing:.1em}
+  .energy{display:flex;gap:2px;height:9px;align-items:flex-end}
+  .energy i{width:3px;background:var(--energy-dim);border-radius:1px}
+  .energy i.on{background:var(--energy)}
+
+  /* ---- Section label ---- */
+  .seclabel{font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--muted-2);margin:22px 2px 8px}
+
+  /* ============ WHEEL screen ============ */
+  .wheel-wrap{display:flex;flex-direction:column;align-items:center}
+  .wheel-stage{position:relative;width:300px;height:300px;margin:6px auto 4px}
+  .wheel-stage svg{width:100%;height:100%;display:block;overflow:visible}
+  .wheel-seg{cursor:pointer;transition:opacity .25s, filter .25s;transform-origin:150px 150px}
+  .wheel-seg text{pointer-events:none;font-family:var(--ff-mono);font-weight:700;fill:#05100e}
+  .wheel-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:118px;height:118px;border-radius:50%;background:var(--bg-2);border:1px solid var(--line);display:grid;place-content:center;text-align:center}
+  .wheel-center .k{font-family:var(--ff-display);font-weight:700;font-size:34px;line-height:1;color:var(--key)}
+  .wheel-center .kl{font-family:var(--ff-mono);font-size:10px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-top:5px}
+  .legend-row{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin:14px 0 4px;font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.05em;color:var(--muted)}
+  .legend-row span{display:flex;align-items:center;gap:6px}
+  .legend-row i{width:10px;height:10px;border-radius:3px}
+  .match-head{display:flex;align-items:baseline;justify-content:space-between;margin:20px 2px 4px}
+  .match-head h3{font-family:var(--ff-display);font-size:17px;font-weight:600}
+  .match-head b{font-family:var(--ff-mono);color:var(--key);font-size:13px}
+
+  /* ============ STUDIO screen ============ */
+  .deck{background:linear-gradient(160deg,var(--surface),var(--bg-2));border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+  .deck-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .deck-top .nm{font-family:var(--ff-display);font-weight:600;font-size:16px}
+  .deck-top .meta{font-family:var(--ff-mono);font-size:11px;color:var(--muted)}
+  .deck-top .meta b{color:var(--key)}
+  .deck canvas{width:100%;height:56px;display:block;border-radius:8px}
+  .transport{display:flex;align-items:center;justify-content:center;gap:22px;margin:20px 0 6px}
+  .tbtn{width:52px;height:52px;border-radius:50%;background:var(--surface);border:1px solid var(--line);color:var(--text);display:grid;place-items:center;font-size:19px;cursor:pointer}
+  .tbtn.play{width:70px;height:70px;background:var(--key);color:#04120f;border:none;font-size:26px;box-shadow:0 0 30px -6px var(--key)}
+  .tbtn.rec{color:var(--energy)}
+  .pads{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:8px}
+  .pad{aspect-ratio:1;border-radius:14px;background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;justify-content:flex-end;padding:9px;cursor:pointer;transition:.12s;position:relative}
+  .pad .lbl{font-family:var(--ff-mono);font-size:9.5px;color:var(--muted);letter-spacing:.05em}
+  .pad .dotc{position:absolute;top:9px;right:9px;width:7px;height:7px;border-radius:50%}
+  .pad:active{transform:scale(.95)}
+  .pad.lit{border-color:transparent;box-shadow:0 0 0 1px currentColor inset, 0 0 22px -8px currentColor}
+
+  /* ============ FEED screen ============ */
+  .post{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:16px}
+  .post-head{display:flex;align-items:center;gap:11px;padding:13px 14px}
+  .avatar{width:38px;height:38px;border-radius:50%;flex:none;display:grid;place-items:center;font-family:var(--ff-display);font-weight:700;font-size:15px;color:#05100e}
+  .post-head .nm{font-weight:600;font-size:14px}
+  .post-head .sub{font-size:11.5px;color:var(--muted);font-family:var(--ff-mono)}
+  .post-head .foll{margin-left:auto;font-family:var(--ff-mono);font-size:11px;color:var(--key);border:1px solid var(--key-dim);padding:5px 11px;border-radius:999px}
+  .post-art{padding:2px 14px 12px}
+  .post-art .ttl{font-family:var(--ff-display);font-weight:600;font-size:16px;margin-bottom:9px}
+  .post-art canvas{width:100%;height:46px;display:block}
+  .tags{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
+  .tag{font-family:var(--ff-mono);font-size:10.5px;padding:4px 9px;border-radius:7px;background:var(--surface-2);color:var(--muted);letter-spacing:.03em}
+  .tag.k{color:var(--key)}.tag.e{color:var(--energy)}
+  .post-actions{display:flex;align-items:center;gap:20px;padding:11px 15px;border-top:1px solid var(--line-soft);font-family:var(--ff-mono);font-size:12.5px;color:var(--muted)}
+  .post-actions .a{display:flex;align-items:center;gap:6px}
+  .post-actions .remix{margin-left:auto;color:var(--violet);font-weight:700}
+
+  /* ============ PROFILE ============ */
+  .prof-hero{display:flex;flex-direction:column;align-items:center;text-align:center;padding:14px 0 4px}
+  .prof-av{width:82px;height:82px;border-radius:50%;display:grid;place-items:center;font-family:var(--ff-display);font-weight:700;font-size:32px;color:#05100e;background:conic-gradient(from 200deg,var(--key),var(--violet),var(--energy),var(--key))}
+  .prof-hero h3{font-family:var(--ff-display);font-size:22px;font-weight:700;margin-top:12px}
+  .prof-hero .h{font-family:var(--ff-mono);font-size:12px;color:var(--muted);margin-top:2px}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:20px 0}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:14px 8px;text-align:center}
+  .stat b{font-family:var(--ff-mono);font-size:22px;display:block;color:var(--text)}
+  .stat span{font-size:10.5px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  .krow{display:flex;gap:8px;margin-top:6px}
+  .kbadge{flex:1;text-align:center;padding:12px 0;border-radius:13px;font-family:var(--ff-mono);font-weight:700;color:#05100e;font-size:15px}
+  .kbadge small{display:block;font-size:9px;font-weight:400;opacity:.7;margin-top:2px}
+
+  /* ============ TAB BAR ============ */
+  .tabbar{position:absolute;bottom:0;left:0;right:0;height:var(--tab-h);background:rgba(12,14,20,.86);backdrop-filter:blur(18px);border-top:1px solid var(--line);display:flex;padding:9px 6px 20px;z-index:50}
+  .tab{flex:1;background:none;border:none;color:var(--muted-2);display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;font-family:var(--ff-mono);font-size:9.5px;letter-spacing:.05em;transition:.18s}
+  .tab svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.9}
+  .tab.on{color:var(--key)}
+  .tab.on.studio{color:var(--energy)}
+  .fab-note{position:absolute;bottom:calc(var(--tab-h) + 6px);right:16px;z-index:55}
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  /* pulse for playing / rec */
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .live{animation:pulse 1.4s ease-in-out infinite}
+</style>
+
+<div class="pitch">
+  <div class="kicker">Concept · iOS</div>
+  <h1>PHASE<span>.</span></h1>
+  <div style="font-family:var(--ff-mono);font-size:12.5px;color:var(--muted);letter-spacing:.04em">Mix in key. Make it yours.</div>
+  <p>The harmonic analysis of Mixed In Key — key, BPM, energy, cue points — fused with BandLab's studio and social feed. Every track knows what mixes next; every mix is one tap from being shared or remixed.</p>
+  <div class="legend">
+    <div><span class="dot" style="background:var(--key)"></span><b>Cyan</b>&nbsp;— key &amp; harmonic matching</div>
+    <div><span class="dot" style="background:var(--energy)"></span><b>Amber</b>&nbsp;— energy &amp; tempo</div>
+    <div><span class="dot" style="background:var(--violet)"></span><b>Violet</b>&nbsp;— remix &amp; collaboration</div>
+  </div>
+  <p style="font-size:12.5px;color:var(--muted-2);margin-top:24px">Tap the bottom tabs. On the <b style="color:var(--key)">Wheel</b>, tap any key to light up every compatible mix.</p>
+</div>
+
+<div class="device">
+  <div class="notch"></div>
+  <div class="screen-frame">
+    <div class="statusbar">
+      <span>9:41</span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <span class="sig"><i style="height:5px"></i><i style="height:7px"></i><i style="height:9px"></i><i style="height:11px"></i></span>
+        <span class="batt"></span>
+      </span>
+    </div>
+
+    <div class="app">
+      <!-- ============ CRATE ============ -->
+      <section class="screen active" id="s-crate">
+        <div class="topline">
+          <div><div class="eyebrow">Your Library · 248 tracks</div><h2>Crate</h2></div>
+          <button class="icon-btn" aria-label="Sort">⇅</button>
+        </div>
+        <div class="search">🔍 Search tracks, keys, BPM…</div>
+        <div class="chips" id="crate-chips">
+          <span class="chip on">All</span>
+          <span class="chip">Analyzed</span>
+          <span class="chip">120–128</span>
+          <span class="chip">High energy</span>
+          <span class="chip">8A · 8B</span>
+          <span class="chip">Recent</span>
+        </div>
+        <div id="track-list"></div>
+      </section>
+
+      <!-- ============ WHEEL ============ -->
+      <section class="screen" id="s-wheel">
+        <div class="topline">
+          <div><div class="eyebrow">Harmonic Mixing</div><h2>Camelot</h2></div>
+          <button class="icon-btn" aria-label="Info">?</button>
+        </div>
+        <div class="wheel-wrap">
+          <div class="wheel-stage">
+            <svg viewBox="0 0 300 300" id="wheel-svg" aria-label="Camelot wheel"></svg>
+            <div class="wheel-center"><div class="k" id="wc-key">8A</div><div class="kl" id="wc-name">A minor</div></div>
+          </div>
+          <div class="legend-row">
+            <span><i style="background:var(--key)"></i> Selected</span>
+            <span><i style="background:var(--surface-2)"></i> Compatible</span>
+            <span><i style="background:#12141c"></i> Clash</span>
+          </div>
+        </div>
+        <div class="match-head"><h3>Mixes from here</h3><b id="match-count">— tracks</b></div>
+        <div id="match-list"></div>
+      </section>
+
+      <!-- ============ STUDIO ============ -->
+      <section class="screen" id="s-studio">
+        <div class="topline">
+          <div><div class="eyebrow">Untitled Set · 2 layers</div><h2>Studio</h2></div>
+          <button class="icon-btn" style="color:var(--energy)" aria-label="Record">●</button>
+        </div>
+        <div class="deck">
+          <div class="deck-top"><div class="nm">Deck A — Neon Tide</div><div class="meta"><b>8A</b> · 124 BPM</div></div>
+          <canvas id="deckA" width="640" height="112"></canvas>
+        </div>
+        <div class="deck">
+          <div class="deck-top"><div class="nm">Deck B — Midnight Protocol</div><div class="meta"><b>9A</b> · 126 BPM · +1 key</div></div>
+          <canvas id="deckB" width="640" height="112"></canvas>
+        </div>
+        <div class="transport">
+          <button class="tbtn" aria-label="Previous">⏮</button>
+          <button class="tbtn play" id="playbtn" aria-label="Play">▶</button>
+          <button class="tbtn rec" aria-label="Record">●</button>
+        </div>
+        <div class="seclabel">Sampler · tap to trigger</div>
+        <div class="pads" id="pads"></div>
+      </section>
+
+      <!-- ============ FEED ============ -->
+      <section class="screen" id="s-feed">
+        <div class="topline">
+          <div><div class="eyebrow">Community</div><h2>Feed</h2></div>
+          <button class="icon-btn" aria-label="Notifications">🔔</button>
+        </div>
+        <div id="feed-list"></div>
+      </section>
+
+      <!-- ============ PROFILE ============ -->
+      <section class="screen" id="s-you">
+        <div class="topline">
+          <div><div class="eyebrow">Producer · DJ</div><h2>You</h2></div>
+          <button class="icon-btn" aria-label="Settings">⚙</button>
+        </div>
+        <div class="prof-hero">
+          <div class="prof-av">KV</div>
+          <h3>Kai Vega</h3>
+          <div class="h">@kaivega · joined 2024</div>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>1.2k</b><span>Followers</span></div>
+          <div class="stat"><b>63</b><span>Mixes</span></div>
+          <div class="stat"><b>248</b><span>Analyzed</span></div>
+        </div>
+        <div class="seclabel">Your dominant keys</div>
+        <div class="krow" id="dom-keys"></div>
+        <div class="seclabel">This week</div>
+        <div class="deck" style="margin-top:2px">
+          <div style="display:flex;justify-content:space-between;font-family:var(--ff-mono);font-size:12px;color:var(--muted)">
+            <span>Avg. mix energy</span><b style="color:var(--energy)">7.4 / 10</b>
+          </div>
+          <div style="display:flex;gap:3px;height:34px;align-items:flex-end;margin-top:12px" id="wk"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ TABS ============ -->
+    <nav class="tabbar">
+      <button class="tab on" data-screen="s-crate">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>Crate
+      </button>
+      <button class="tab" data-screen="s-wheel">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/></svg>Wheel
+      </button>
+      <button class="tab studio" data-screen="s-studio">
+        <svg viewBox="0 0 24 24"><path d="M6 4v16M12 4v16M18 4v16" stroke-linecap="round"/><circle cx="6" cy="9" r="2.2" fill="currentColor" stroke="none"/><circle cx="12" cy="15" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="7" r="2.2" fill="currentColor" stroke="none"/></svg>Studio
+      </button>
+      <button class="tab" data-screen="s-feed">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z" stroke-linejoin="round"/></svg>Feed
+      </button>
+      <button class="tab" data-screen="s-you">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0115 0" stroke-linecap="round"/></svg>You
+      </button>
+    </nav>
+  </div>
+</div>
+
+<script>
+/* ---------------- Camelot data ---------------- */
+// number 1..12, letter A(minor)/B(major). Hue mapped around the wheel.
+const CAM_NAMES = {
+  A:["","A♭ min","E♭ min","B♭ min","F min","C min","G min","D min","A min","E min","B min","F♯ min","D♭ min"],
+  B:["","B maj","F♯ maj","D♭ maj","A♭ maj","E♭ maj","B♭ maj","F maj","C maj","G maj","D maj","A maj","E maj"]
+};
+function camHue(n){ return ((n-1)*30 + 150) % 360; }          // spread 12 hues
+function camColor(n,l){ const h=camHue(n); return `hsl(${h} ${l==='A'?62:70}% ${l==='A'?52:60}%)`; }
+function camKey(n,l){ return n+l; }
+
+/* compatible = same key, ±1 same letter, relative (same n other letter) */
+function compatible(sel){
+  const n=parseInt(sel), l=sel.slice(-1);
+  const up=(n%12)+1, dn=(n===1?12:n-1), rel=(l==='A'?'B':'A');
+  return new Set([sel, camKey(up,l), camKey(dn,l), camKey(n,rel)]);
+}
+
+/* ---------------- Track dataset ---------------- */
+const TRACKS = [
+  ["Neon Tide","Khāl","8A",124,6],
+  ["Midnight Protocol","Vessel","9A",126,7],
+  ["Afterglow","Sona","8B",122,5],
+  ["Gravity Well","Dax Mercer","7A",128,8],
+  ["Paper Lanterns","Mira Vale","8A",120,4],
+  ["Concrete Bloom","Fault Line","5A",130,9],
+  ["Slow Static","Odile","9A",125,6],
+  ["Ember Drift","Two Rivers","7A",127,7],
+  ["Halcyon","Nocturne Kids","8B",121,5],
+  ["Pressure Drop","Kilowatt","10A",132,9],
+  ["Velvet Hours","June Sky","6A",118,3],
+  ["Ultraviolet","Sona",  "9A",128,8],
+];
+let seed=42; function rnd(){ seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; }
+
+function waveform(cv, color, played=0.32, res=64){
+  const ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H); const bw=W/res;
+  for(let i=0;i<res;i++){
+    const env=Math.sin((i/res)*Math.PI); // fade ends
+    const h=(0.22+0.78*Math.pow(rnd(),1.3))*env*H;
+    ctx.fillStyle = i/res<played ? color : 'rgba(255,255,255,.14)';
+    ctx.fillRect(i*bw+bw*0.18,(H-h)/2,bw*0.64,h);
+  }
+}
+
+/* ---------------- Render Crate ---------------- */
+function energyBars(e){
+  let s='<div class="energy">';
+  for(let i=1;i<=10;i++) s+=`<i class="${i<=e?'on':''}" style="height:${3+i*0.6}px"></i>`;
+  return s+'</div>';
+}
+function trackRow(t,i){
+  const [nm,ar,key,bpm,e]=t; const n=parseInt(key), l=key.slice(-1);
+  const row=document.createElement('div'); row.className='track';
+  row.innerHTML=`
+    <div class="cam" style="background:${camColor(n,l)}">${key}<small>${CAM_NAMES[l][n]}</small></div>
+    <div class="t-mid"><div class="nm">${nm}</div><div class="ar">${ar}</div><canvas width="360" height="40"></canvas></div>
+    <div class="t-right"><div class="bpm"><b>${bpm}</b> <span>BPM</span></div>${energyBars(e)}</div>`;
+  document.getElementById('track-list').appendChild(row);
+  seed=100+i*7; waveform(row.querySelector('canvas'), camColor(n,l), 0);
+}
+TRACKS.forEach(trackRow);
+
+/* ---------------- Build Camelot wheel ---------------- */
+const SVGNS="http://www.w3.org/2000/svg";
+function arcSeg(cx,cy,r1,r2,a0,a1){
+  const p=(r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];
+  const [x1,y1]=p(r2,a0),[x2,y2]=p(r2,a1),[x3,y3]=p(r1,a1),[x4,y4]=p(r1,a0);
+  const laf=(a1-a0)>Math.PI?1:0;
+  return `M${x1} ${y1}A${r2} ${r2} 0 ${laf} 1 ${x2} ${y2}L${x3} ${y3}A${r1} ${r1} 0 ${laf} 0 ${x4} ${y4}Z`;
+}
+const svg=document.getElementById('wheel-svg');
+let selected='8A';
+function buildWheel(){
+  svg.innerHTML=''; const cx=150,cy=150;
+  const rings=[{l:'B',r1:106,r2:140},{l:'A',r1:70,r2:106}];
+  for(let n=1;n<=12;n++){
+    const a0=(-90 + (n-1)*30 -15)*Math.PI/180, a1=(-90 + (n-1)*30 +15)*Math.PI/180;
+    const mid=(a0+a1)/2;
+    rings.forEach(ring=>{
+      const key=camKey(n,ring.l);
+      const g=document.createElementNS(SVGNS,'g'); g.setAttribute('class','wheel-seg'); g.dataset.key=key;
+      const path=document.createElementNS(SVGNS,'path');
+      path.setAttribute('d',arcSeg(cx,cy,ring.r1,ring.r2,a0,a1));
+      path.setAttribute('fill',camColor(n,ring.l));
+      g.appendChild(path);
+      const tr=(ring.r1+ring.r2)/2;
+      const tx=cx+tr*Math.cos(mid), ty=cy+tr*Math.sin(mid);
+      const txt=document.createElementNS(SVGNS,'text');
+      txt.setAttribute('x',tx); txt.setAttribute('y',ty+4);
+      txt.setAttribute('text-anchor','middle'); txt.setAttribute('font-size','12');
+      txt.textContent=key;
+      g.appendChild(txt);
+      g.addEventListener('click',()=>selectKey(key));
+      svg.appendChild(g);
+    });
+  }
+  paintWheel();
+}
+function selectKey(key){ selected=key; paintWheel(); renderMatches(); }
+function paintWheel(){
+  const comp=compatible(selected);
+  const n=parseInt(selected),l=selected.slice(-1);
+  document.getElementById('wc-key').textContent=selected;
+  document.getElementById('wc-name').textContent=CAM_NAMES[l][n];
+  svg.querySelectorAll('.wheel-seg').forEach(g=>{
+    const k=g.dataset.key, path=g.querySelector('path');
+    if(k===selected){ g.style.opacity=1; path.style.filter='saturate(1.3) brightness(1.15)'; g.querySelector('text').style.fontSize='13'; }
+    else if(comp.has(k)){ g.style.opacity=1; path.style.filter='none'; g.querySelector('text').style.fontSize='12'; }
+    else { g.style.opacity=.16; path.style.filter='grayscale(.6)'; g.querySelector('text').style.fontSize='12'; }
+  });
+}
+function renderMatches(){
+  const comp=compatible(selected);
+  const list=document.getElementById('match-list'); list.innerHTML='';
+  const matches=TRACKS.filter(t=>comp.has(t[2]) && t[2]!==selected)
+                      .concat(TRACKS.filter(t=>t[2]===selected));
+  document.getElementById('match-count').textContent=matches.length+' tracks';
+  matches.slice(0,7).forEach((t,i)=>{
+    const [nm,ar,key,bpm,e]=t; const n=parseInt(key),l=key.slice(-1);
+    const rel = key===selected?'perfect' : (parseInt(key)===n && l!==selected.slice(-1))?'energy shift'
+              : (l===selected.slice(-1))?'+/- key':'blend';
+    const row=document.createElement('div'); row.className='track';
+    row.innerHTML=`
+      <div class="cam" style="background:${camColor(n,l)}">${key}</div>
+      <div class="t-mid"><div class="nm">${nm}</div><div class="ar">${ar} · <span style="color:var(--key)">${rel}</span></div></div>
+      <div class="t-right"><div class="bpm"><b>${bpm}</b> <span>BPM</span></div>${energyBars(e)}</div>`;
+    list.appendChild(row);
+  });
+}
+buildWheel(); renderMatches();
+
+/* ---------------- Studio ---------------- */
+seed=7;  waveform(document.getElementById('deckA'), camColor(8,'A'), 0.4);
+seed=19; waveform(document.getElementById('deckB'), camColor(9,'A'), 0.4);
+const PADS=[["KICK",'var(--energy)'],["SNARE",'var(--key)'],["HAT",'var(--violet)'],["CLAP",'var(--energy)'],
+            ["VOX",'var(--key)'],["FX",'var(--violet)'],["BASS",'var(--energy)'],["STAB",'var(--key)'],
+            ["RISE",'var(--violet)'],["PERC",'var(--key)'],["SUB",'var(--energy)'],["AIR",'var(--violet)']];
+const padWrap=document.getElementById('pads');
+PADS.forEach(([lbl,c])=>{
+  const p=document.createElement('button'); p.className='pad'; p.style.color=c;
+  p.innerHTML=`<span class="dotc" style="background:${c}"></span><span class="lbl">${lbl}</span>`;
+  p.addEventListener('pointerdown',()=>{p.classList.add('lit');setTimeout(()=>p.classList.remove('lit'),200);});
+  padWrap.appendChild(p);
+});
+const playbtn=document.getElementById('playbtn');
+playbtn.addEventListener('click',()=>{
+  const on=playbtn.textContent==='▶'; playbtn.textContent=on?'⏸':'▶';
+  playbtn.classList.toggle('live',on);
+});
+
+/* ---------------- Feed ---------------- */
+const FEED=[
+  ["Odile","OD",'var(--key)',"2h · dropped a mix","Rooftop, 3am","6A",118,7,342,58],
+  ["Kilowatt","KW",'var(--energy)',"5h · dropped a mix","Warehouse Cut","10A",132,9,1204,190],
+  ["June Sky","JS",'var(--violet)',"1d · remixed you","Velvet Hours (Kai V. flip)","6A",120,4,876,143],
+];
+const feed=document.getElementById('feed-list');
+FEED.forEach((f,i)=>{
+  const [nm,av,c,sub,ttl,key,bpm,e,plays,likes]=f; const n=parseInt(key),l=key.slice(-1);
+  const post=document.createElement('article'); post.className='post';
+  post.innerHTML=`
+    <div class="post-head">
+      <div class="avatar" style="background:${c}">${av}</div>
+      <div><div class="nm">${nm}</div><div class="sub">${sub}</div></div>
+      <div class="foll">Follow</div>
+    </div>
+    <div class="post-art">
+      <div class="ttl">${ttl}</div>
+      <canvas width="640" height="92"></canvas>
+      <div class="tags"><span class="tag k">◐ ${key} · ${CAM_NAMES[l][n]}</span><span class="tag e">${bpm} BPM</span><span class="tag">Energy ${e}</span></div>
+    </div>
+    <div class="post-actions">
+      <span class="a">♥ ${likes}</span><span class="a">▶ ${plays}</span><span class="a">💬 ${Math.floor(likes/4)}</span>
+      <span class="a remix">⟳ Remix</span>
+    </div>`;
+  feed.appendChild(post);
+  seed=200+i*13; waveform(post.querySelector('canvas'), c, 0);
+});
+
+/* ---------------- Profile ---------------- */
+const DOM=[["8A","A min",'var(--key)'],["9A","E min","hsl(390 62% 52%)"],["5A","F min","hsl(270 62% 52%)"]];
+const dk=document.getElementById('dom-keys');
+DOM.forEach(([k,nm])=>{ const n=parseInt(k),l=k.slice(-1);
+  const b=document.createElement('div'); b.className='kbadge'; b.style.background=camColor(n,l);
+  b.innerHTML=`${k}<small>${nm}</small>`; dk.appendChild(b);
+});
+const wk=document.getElementById('wk'); const days=[5,7,4,8,6,9,7];
+days.forEach(d=>{ const i=document.createElement('div');
+  i.style.cssText=`flex:1;height:${d*10}%;min-height:6px;border-radius:3px;background:linear-gradient(var(--energy),var(--energy-dim))`; wk.appendChild(i);});
+
+/* ---------------- Tab switching ---------------- */
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+    tab.classList.add('on');
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById(tab.dataset.screen).classList.add('active');
+  });
+});
+</script>
