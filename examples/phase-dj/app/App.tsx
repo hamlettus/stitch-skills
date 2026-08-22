@@ -10,6 +10,7 @@ import { SpaceMono_400Regular, SpaceMono_700Bold } from '@expo-google-fonts/spac
 import { colors } from '@/theme';
 import { RootTabs } from '@/navigation/RootTabs';
 import { DeckProvider } from '@/context/DeckContext';
+import { MixesProvider } from '@/context/MixesContext';
 
 export interface AppProps {}
 
@@ -45,10 +46,12 @@ export default function App(_props: AppProps) {
   return (
     <SafeAreaProvider>
       <DeckProvider>
-        <NavigationContainer theme={navTheme}>
-          <StatusBar style="light" />
-          <RootTabs />
-        </NavigationContainer>
+        <MixesProvider>
+          <NavigationContainer theme={navTheme}>
+            <StatusBar style="light" />
+            <RootTabs />
+          </NavigationContainer>
+        </MixesProvider>
       </DeckProvider>
     </SafeAreaProvider>
   );

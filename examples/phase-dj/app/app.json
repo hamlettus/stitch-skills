@@ -9,15 +9,35 @@
     "backgroundColor": "#0A0B0F",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.phase.dj"
+      "bundleIdentifier": "app.phase.dj",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "PHASE records your mixes so you can publish them to your feed.",
+        "NSAppleMusicUsageDescription": "PHASE reads your music library so you can load your own tracks onto the decks.",
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
-      "package": "app.phase.dj"
+      "package": "app.phase.dj",
+      "permissions": [
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "READ_MEDIA_AUDIO"
+      ]
     },
     "splash": {
       "backgroundColor": "#0A0B0F",
       "resizeMode": "contain"
     },
-    "plugins": ["expo-font"]
+    "plugins": [
+      "expo-font",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": false,
+          "savePhotosPermission": false,
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
+    ]
   }
 }

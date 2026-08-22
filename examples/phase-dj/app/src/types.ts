@@ -33,3 +33,24 @@ export interface LoadedTrack {
   /** Display name, typically the file name without extension. */
   readonly name: string;
 }
+
+/** An audio asset read from the device's media library. */
+export interface LibraryTrack {
+  readonly id: string;
+  readonly uri: string;
+  readonly name: string;
+  readonly durationMs: number;
+}
+
+/** A mix recorded in the Studio and published to the local feed. */
+export interface RecordedMix {
+  readonly id: string;
+  readonly uri: string;
+  readonly title: string;
+  readonly durationMs: number;
+  /** Epoch millis when the recording finished. */
+  readonly createdAt: number;
+  readonly keyA: string | null;
+  readonly keyB: string | null;
+  readonly bpm: number | null;
+}

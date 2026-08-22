@@ -17,6 +17,8 @@ export interface DeckState {
   /** Camelot key code (e.g. "8A") set by the key picker, or null. */
   readonly musicKey: string | null;
   readonly loadFile: () => Promise<void>;
+  /** Load a specific URI (e.g. picked from the media library). */
+  readonly loadUri: (uri: string, name: string) => Promise<void>;
   readonly toggle: () => Promise<void>;
   readonly setVolume: (v: number) => Promise<void>;
   /** Record one tap; calculates BPM from the rolling interval average. */
@@ -54,14 +56,7 @@ export function useDeck(): DeckState {
     };
   }, []);
 
-  const loadFile = useCallback(async () => {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: 'audio/*',
-      copyToCacheDirectory: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-
+  const loadUri = useCallback(async (uri: string, name: string) => {
     // Unload any previous sound
     if (soundRef.current) {
       await soundRef.current.unloadAsync();
@@ -74,7 +69,7 @@ export function useDeck(): DeckState {
     await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
 
     const { sound } = await Audio.Sound.createAsync(
-      { uri: asset.uri },
+      { uri },
       { shouldPlay: false, volume: 1.0 },
       (status) => {
         if (!status.isLoaded) return;
@@ -87,17 +82,23 @@ export function useDeck(): DeckState {
     );
 
     soundRef.current = sound;
-
-    // Strip extension from display name
-    const raw = asset.name ?? 'Unknown Track';
-    const displayName = raw.replace(/\.[^.]+$/, '');
-    setTrack({ uri: asset.uri, name: displayName });
+    setTrack({ uri, name: name.replace(/\.[^.]+$/, '') });
 
     // Reset per-track metadata so stale values from a previous load don't persist
     setBpm(null);
     setMusicKeyState(null);
     tapTimesRef.current = [];
   }, []);
+
+  const loadFile = useCallback(async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: 'audio/*',
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    await loadUri(asset.uri, asset.name ?? 'Unknown Track');
+  }, [loadUri]);
 
   const toggle = useCallback(async () => {
     const sound = soundRef.current;
@@ -143,5 +144,5 @@ export function useDeck(): DeckState {
 
   const positionRatio = durationMs > 0 ? positionMs / durationMs : 0;
 
-  return { track, playing, positionRatio, durationMs, bpm, musicKey, loadFile, toggle, setVolume, tapTempo, setMusicKey };
+  return { track, playing, positionRatio, durationMs, bpm, musicKey, loadFile, loadUri, toggle, setVolume, tapTempo, setMusicKey };
 }

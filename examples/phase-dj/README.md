@@ -49,14 +49,41 @@ component passes the skill's `scripts/validate.js`, and `tsc --noEmit` is clean.
 
 ### What actually works right now
 
-- **Navigation** — all five tabs (Crate · Wheel · Studio · Feed · You) render real data.
+- **Two real decks** — load any track from your **music library** (or the file
+  picker), with live playhead, timecodes, and independent play/pause per deck.
+- **Crossfader** — drag to blend the decks with a standard DJ linear taper.
+- **Tap tempo** — tap the beat 3+ times per deck; a rolling 8-tap average sets
+  the BPM (`src/hooks/useDeck.ts`).
+- **Key picker** — assign any of the 24 Camelot keys to a deck; the deck's
+  waveform recolours to that key's hue.
+- **Recording** — capture the mix through the mic and publish it to your Feed,
+  tagged with both decks' keys and the BPM (`src/hooks/useRecorder.ts`).
 - **Camelot wheel** — tap any of the 24 keys; compatible keys light up and the
-  match list + track suggestions recompute live (`src/hooks/useHarmonicMatches.ts`).
-- **Sound** — the Studio **makes real audio**. The 12 sampler pads trigger
-  synthesized drum one-shots (`expo-av` + haptics), and the play button loops a
-  124 BPM drum pattern. Audio is generated, bundled WAVs in `app/assets/audio/`.
-- **Crate** — filter chips, search field, per-track waveform, Camelot badge, BPM,
-  and energy meter.
+  match list recomputes live. Deck A / Deck B shortcut buttons snap the wheel to
+  whatever is loaded.
+- **Crate** — search, filter chips, and dynamic **♥ Deck A / ♥ Deck B** chips that
+  narrow the list to harmonically compatible tracks only. Tapping a track jumps
+  to the Wheel on that key.
+- **Sampler** — 12 pads trigger synthesized drum one-shots (`expo-av` + haptics).
+  Audio is generated, bundled WAVs in `app/assets/audio/`.
+
+### The loop
+
+Load a track → tap its tempo → set its key → the Wheel and Crate both react →
+find a compatible track → load it on Deck B → crossfade → record → it appears in
+your Feed. Shared state lives in `src/context/DeckContext.tsx` (deck keys/BPM,
+cross-tab wheel jumps) and `src/context/MixesContext.tsx` (recorded mixes).
+
+### Known platform limits
+
+- **DRM'd streaming tracks** (Apple Music, Spotify) are not readable by third-party
+  apps. The library picker surfaces downloaded and purchased files only; use the
+  file picker fallback for anything else.
+- **Recording captures the microphone**, not the internal audio bus — iOS does not
+  expose internal capture to third-party apps. Play the mix out loud, or route it
+  through an audio interface.
+- **The Feed is local.** Mixes persist on-device via AsyncStorage. Sharing to other
+  users needs a backend (see below).
 
 ### Run it on your iPhone (no App Store needed)
 
@@ -74,12 +101,14 @@ component passes the skill's `scripts/validate.js`, and `tsc --noEmit` is clean.
 
 ### Still to build (staged)
 
-1. **Real track audio** — import your own files (MediaLibrary / document picker)
-   and play them on the decks with time-stretch + key-lock crossfade.
-2. **On-device analysis** — real key / BPM / energy detection on import
-   (Essentia/aubio-style DSP or a Core ML model) instead of the mock metadata.
-3. **Backend** — accounts, the social feed, mix hosting, and remix lineage.
-4. **Recording & export** — capture a mix and publish it to the feed.
+1. **On-device analysis** — automatic key / BPM / energy detection on load
+   (Essentia/aubio-style DSP or a Core ML model), replacing tap tempo and the
+   manual key picker with real detection.
+2. **Beat-matching** — time-stretch and key-lock so the crossfader blends
+   tempo-aligned tracks rather than mixing raw volumes.
+3. **Backend** — accounts, a networked feed, mix hosting, and remix lineage, so
+   the Feed reaches beyond this device.
+4. **Export** — render a mix to a shareable file rather than a mic capture.
 
 ---
 

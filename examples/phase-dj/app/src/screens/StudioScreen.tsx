@@ -1,17 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { colors, fonts, space } from '@/theme';
 import { ScreenHeader } from '@/components/molecules/ScreenHeader';
 import { DeckCard } from '@/components/molecules/DeckCard';
 import { CrossfaderSlider } from '@/components/molecules/CrossfaderSlider';
 import { KeyPickerModal } from '@/components/molecules/KeyPickerModal';
+import { RecordBar } from '@/components/molecules/RecordBar';
+import { LibraryPickerModal } from '@/components/organisms/LibraryPickerModal';
 import { SamplerGrid } from '@/components/organisms/SamplerGrid';
 import { SectionLabel } from '@/components/atoms/SectionLabel';
 import { useDeck } from '@/hooks/useDeck';
 import { useSampler } from '@/hooks/useSampler';
+import { useRecorder } from '@/hooks/useRecorder';
 import { useDeckContext } from '@/context/DeckContext';
-import { PadDef } from '@/types';
+import { useMixes } from '@/context/MixesContext';
+import { PadDef, LibraryTrack } from '@/types';
 
 export interface StudioScreenProps {
   readonly setName?: string;
@@ -24,14 +29,18 @@ function crossfadeVolumes(cf: number): [number, number] {
   return [volA, volB];
 }
 
-type PickerTarget = 'A' | 'B' | null;
+type DeckTarget = 'A' | 'B' | null;
 
 export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set' }) => {
   const deckA = useDeck();
   const deckB = useDeck();
   const { trigger } = useSampler();
+  const recorder = useRecorder();
+  const navigation = useNavigation<any>();
+  const { publish } = useMixes();
   const [crossfade, setCrossfade] = useState(0.5);
-  const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
+  const [keyTarget, setKeyTarget] = useState<DeckTarget>(null);
+  const [libTarget, setLibTarget] = useState<DeckTarget>(null);
   const { setDeckAKey, setDeckABpm, setDeckBKey, setDeckBBpm } = useDeckContext();
 
   // Mirror deck characterization into shared context so Wheel + Crate can react
@@ -51,18 +60,45 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
     void trigger(pad.sound);
   };
 
-  // Which deck's key is being edited?
-  const editingDeck = pickerTarget === 'A' ? deckA : pickerTarget === 'B' ? deckB : null;
+  const editingKeyDeck = keyTarget === 'A' ? deckA : keyTarget === 'B' ? deckB : null;
+  const loadingDeck = libTarget === 'A' ? deckA : libTarget === 'B' ? deckB : null;
+
+  const onLibrarySelect = (t: LibraryTrack) => {
+    void loadingDeck?.loadUri(t.uri, t.name);
+  };
+
+  const onRecordToggle = async () => {
+    if (recorder.recording) {
+      const result = await recorder.stop();
+      if (!result) return;
+
+      const titleParts = [deckA.track?.name, deckB.track?.name].filter(Boolean);
+      await publish({
+        id: `mix-${Date.now()}`,
+        uri: result.uri,
+        title: titleParts.length > 0 ? titleParts.join('  ×  ') : 'Untitled Mix',
+        durationMs: result.durationMs,
+        createdAt: Date.now(),
+        keyA: deckA.musicKey,
+        keyB: deckB.musicKey,
+        bpm: deckA.bpm ?? deckB.bpm,
+      });
+      navigation.navigate('Feed');
+    } else {
+      await recorder.start();
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader
-          eyebrow={setName}
-          title="Studio"
-          rightGlyph="●"
-          rightColor={colors.energy}
-          rightLabel="Record"
+        <ScreenHeader eyebrow={setName} title="Studio" />
+
+        <RecordBar
+          recording={recorder.recording}
+          elapsedMs={recorder.elapsedMs}
+          permissionDenied={recorder.permissionDenied}
+          onToggle={() => void onRecordToggle()}
         />
 
         <DeckCard
@@ -73,10 +109,10 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
           durationMs={deckA.durationMs}
           bpm={deckA.bpm}
           musicKey={deckA.musicKey}
-          onLoad={() => void deckA.loadFile()}
+          onLoad={() => setLibTarget('A')}
           onToggle={() => void deckA.toggle()}
           onTapTempo={deckA.tapTempo}
-          onOpenKeyPicker={() => setPickerTarget('A')}
+          onOpenKeyPicker={() => setKeyTarget('A')}
           seed={7}
         />
 
@@ -93,10 +129,10 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
           durationMs={deckB.durationMs}
           bpm={deckB.bpm}
           musicKey={deckB.musicKey}
-          onLoad={() => void deckB.loadFile()}
+          onLoad={() => setLibTarget('B')}
           onToggle={() => void deckB.toggle()}
           onTapTempo={deckB.tapTempo}
-          onOpenKeyPicker={() => setPickerTarget('B')}
+          onOpenKeyPicker={() => setKeyTarget('B')}
           seed={19}
         />
 
@@ -104,14 +140,23 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
         <SamplerGrid onTrigger={onPad} />
       </ScrollView>
 
-      {/* Key picker modal — rendered above ScrollView */}
-      {pickerTarget != null && editingDeck != null && (
+      {keyTarget != null && editingKeyDeck != null && (
         <KeyPickerModal
           visible={true}
-          selected={editingDeck.musicKey}
-          deckLabel={`Deck ${pickerTarget}`}
-          onSelect={editingDeck.setMusicKey}
-          onClose={() => setPickerTarget(null)}
+          selected={editingKeyDeck.musicKey}
+          deckLabel={`Deck ${keyTarget}`}
+          onSelect={editingKeyDeck.setMusicKey}
+          onClose={() => setKeyTarget(null)}
+        />
+      )}
+
+      {libTarget != null && loadingDeck != null && (
+        <LibraryPickerModal
+          visible={true}
+          deckLabel={`Deck ${libTarget}`}
+          onSelect={onLibrarySelect}
+          onClose={() => setLibTarget(null)}
+          onBrowseFiles={() => void loadingDeck.loadFile()}
         />
       )}
     </SafeAreaView>
