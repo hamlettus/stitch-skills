@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fonts, space } from '@/theme';
 import { ScreenHeader } from '@/components/molecules/ScreenHeader';
 import { DeckCard } from '@/components/molecules/DeckCard';
 import { CrossfaderSlider } from '@/components/molecules/CrossfaderSlider';
+import { KeyPickerModal } from '@/components/molecules/KeyPickerModal';
 import { SamplerGrid } from '@/components/organisms/SamplerGrid';
 import { SectionLabel } from '@/components/atoms/SectionLabel';
 import { useDeck } from '@/hooks/useDeck';
@@ -15,20 +16,23 @@ export interface StudioScreenProps {
   readonly setName?: string;
 }
 
-/** DJ-style linear crossfade: center = both full, sides fade the opposite deck. */
+/** DJ-style linear crossfade: center = both full; sides fade the opposite deck. */
 function crossfadeVolumes(cf: number): [number, number] {
   const volA = cf <= 0.5 ? 1.0 : (1.0 - cf) * 2;
   const volB = cf >= 0.5 ? 1.0 : cf * 2;
   return [volA, volB];
 }
 
+type PickerTarget = 'A' | 'B' | null;
+
 export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set' }) => {
   const deckA = useDeck();
   const deckB = useDeck();
   const { trigger } = useSampler();
   const [crossfade, setCrossfade] = useState(0.5);
+  const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
 
-  // Apply crossfader volumes whenever the position changes
+  // Sync volumes on crossfade change
   useEffect(() => {
     const [volA, volB] = crossfadeVolumes(crossfade);
     void deckA.setVolume(volA);
@@ -38,6 +42,9 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
   const onPad = (pad: PadDef) => {
     void trigger(pad.sound);
   };
+
+  // Which deck's key is being edited?
+  const editingDeck = pickerTarget === 'A' ? deckA : pickerTarget === 'B' ? deckB : null;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -56,12 +63,15 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
           playing={deckA.playing}
           positionRatio={deckA.positionRatio}
           durationMs={deckA.durationMs}
+          bpm={deckA.bpm}
+          musicKey={deckA.musicKey}
           onLoad={() => void deckA.loadFile()}
           onToggle={() => void deckA.toggle()}
+          onTapTempo={deckA.tapTempo}
+          onOpenKeyPicker={() => setPickerTarget('A')}
           seed={7}
         />
 
-        {/* Crossfader */}
         <View style={styles.crossfaderRow}>
           <Text style={styles.crossfaderLabel}>CROSSFADER</Text>
           <CrossfaderSlider value={crossfade} onChange={setCrossfade} />
@@ -73,14 +83,29 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
           playing={deckB.playing}
           positionRatio={deckB.positionRatio}
           durationMs={deckB.durationMs}
+          bpm={deckB.bpm}
+          musicKey={deckB.musicKey}
           onLoad={() => void deckB.loadFile()}
           onToggle={() => void deckB.toggle()}
+          onTapTempo={deckB.tapTempo}
+          onOpenKeyPicker={() => setPickerTarget('B')}
           seed={19}
         />
 
         <SectionLabel>Sampler · tap to trigger</SectionLabel>
         <SamplerGrid onTrigger={onPad} />
       </ScrollView>
+
+      {/* Key picker modal — rendered above ScrollView */}
+      {pickerTarget != null && editingDeck != null && (
+        <KeyPickerModal
+          visible={true}
+          selected={editingDeck.musicKey}
+          deckLabel={`Deck ${pickerTarget}`}
+          onSelect={editingDeck.setMusicKey}
+          onClose={() => setPickerTarget(null)}
+        />
+      )}
     </SafeAreaView>
   );
 };

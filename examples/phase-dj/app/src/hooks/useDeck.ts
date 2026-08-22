@@ -3,15 +3,25 @@ import { Audio } from 'expo-av';
 import * as DocumentPicker from 'expo-document-picker';
 import { LoadedTrack } from '@/types';
 
+const TAP_MAX_INTERVAL_MS = 3000; // discard tap if user paused longer than this
+const TAP_WINDOW = 8; // rolling window of taps used for average
+
 export interface DeckState {
   readonly track: LoadedTrack | null;
   readonly playing: boolean;
   /** 0..1 playhead position within the loaded track. */
   readonly positionRatio: number;
   readonly durationMs: number;
+  /** BPM set by tap tempo, or null if not yet tapped. */
+  readonly bpm: number | null;
+  /** Camelot key code (e.g. "8A") set by the key picker, or null. */
+  readonly musicKey: string | null;
   readonly loadFile: () => Promise<void>;
   readonly toggle: () => Promise<void>;
   readonly setVolume: (v: number) => Promise<void>;
+  /** Record one tap; calculates BPM from the rolling interval average. */
+  readonly tapTempo: () => void;
+  readonly setMusicKey: (code: string) => void;
 }
 
 /**
@@ -24,6 +34,9 @@ export function useDeck(): DeckState {
   const [playing, setPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
+  const [bpm, setBpm] = useState<number | null>(null);
+  const [musicKey, setMusicKeyState] = useState<string | null>(null);
+  const tapTimesRef = useRef<number[]>([]);
 
   // Stable ref so PanResponder / closures always call the latest onChange
   const onStatusRef = useRef<(pos: number, dur: number, finished: boolean) => void>(
@@ -79,6 +92,11 @@ export function useDeck(): DeckState {
     const raw = asset.name ?? 'Unknown Track';
     const displayName = raw.replace(/\.[^.]+$/, '');
     setTrack({ uri: asset.uri, name: displayName });
+
+    // Reset per-track metadata so stale values from a previous load don't persist
+    setBpm(null);
+    setMusicKeyState(null);
+    tapTimesRef.current = [];
   }, []);
 
   const toggle = useCallback(async () => {
@@ -97,7 +115,33 @@ export function useDeck(): DeckState {
     await soundRef.current?.setVolumeAsync(Math.max(0, Math.min(1, v)));
   }, []);
 
+  const tapTempo = useCallback(() => {
+    const now = Date.now();
+    const prev = tapTimesRef.current;
+
+    // Drop taps that are too far apart (user paused)
+    const recent = [...prev, now].filter((t, i, arr) => i === 0 || (arr[i] - arr[i - 1]) < TAP_MAX_INTERVAL_MS);
+    tapTimesRef.current = recent.slice(-TAP_WINDOW);
+
+    if (tapTimesRef.current.length >= 2) {
+      const taps = tapTimesRef.current;
+      const intervals: number[] = [];
+      for (let i = 1; i < taps.length; i++) {
+        intervals.push(taps[i] - taps[i - 1]);
+      }
+      const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      const calculated = Math.round(60000 / avg);
+      if (calculated >= 60 && calculated <= 220) {
+        setBpm(calculated);
+      }
+    }
+  }, []);
+
+  const setMusicKey = useCallback((code: string) => {
+    setMusicKeyState(code === '' ? null : code);
+  }, []);
+
   const positionRatio = durationMs > 0 ? positionMs / durationMs : 0;
 
-  return { track, playing, positionRatio, durationMs, loadFile, toggle, setVolume };
+  return { track, playing, positionRatio, durationMs, bpm, musicKey, loadFile, toggle, setVolume, tapTempo, setMusicKey };
 }

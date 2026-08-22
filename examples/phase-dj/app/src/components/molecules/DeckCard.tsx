@@ -2,6 +2,8 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { colors, fonts, radius, space } from '@/theme';
 import { Waveform } from '@/components/atoms/Waveform';
+import { TapTempoBtn } from '@/components/atoms/TapTempoBtn';
+import { keyColor, keyName } from '@/utils/camelot';
 import { LoadedTrack } from '@/types';
 
 export interface DeckCardProps {
@@ -10,8 +12,12 @@ export interface DeckCardProps {
   readonly playing: boolean;
   readonly positionRatio: number;
   readonly durationMs: number;
+  readonly bpm: number | null;
+  readonly musicKey: string | null;
   readonly onLoad: () => void;
   readonly onToggle: () => void;
+  readonly onTapTempo: () => void;
+  readonly onOpenKeyPicker: () => void;
   /** Seed for the placeholder waveform shown before a track is loaded. */
   readonly seed: number;
 }
@@ -29,12 +35,17 @@ export const DeckCard: React.FC<DeckCardProps> = ({
   playing,
   positionRatio,
   durationMs,
+  bpm,
+  musicKey,
   onLoad,
   onToggle,
+  onTapTempo,
+  onOpenKeyPicker,
   seed,
 }) => {
   const elapsed = durationMs > 0 ? formatMs(positionRatio * durationMs) : '0:00';
   const remaining = durationMs > 0 ? `-${formatMs(durationMs - positionRatio * durationMs)}` : '0:00';
+  const kColor = musicKey ? keyColor(musicKey) : colors.muted2;
 
   return (
     <View style={styles.card}>
@@ -46,7 +57,6 @@ export const DeckCard: React.FC<DeckCardProps> = ({
         ) : (
           <Text style={styles.emptyHint}>no track loaded</Text>
         )}
-        {/* Load button */}
         <Pressable
           style={styles.loadBtn}
           onPress={onLoad}
@@ -60,21 +70,33 @@ export const DeckCard: React.FC<DeckCardProps> = ({
       {/* Waveform / empty state */}
       {track ? (
         <>
-          <Waveform seed={seed} color={colors.key} played={positionRatio} height={56} bars={72} />
+          <Waveform
+            seed={seed}
+            color={musicKey ? kColor : colors.key}
+            played={positionRatio}
+            height={56}
+            bars={72}
+          />
           <View style={styles.timecodes}>
             <Text style={styles.tc}>{elapsed}</Text>
             <Text style={styles.tc}>{remaining}</Text>
           </View>
         </>
       ) : (
-        <Pressable style={styles.loadZone} onPress={onLoad} accessibilityRole="button" accessibilityLabel={`Load track onto ${label}`}>
+        <Pressable
+          style={styles.loadZone}
+          onPress={onLoad}
+          accessibilityRole="button"
+          accessibilityLabel={`Load track onto ${label}`}
+        >
           <Text style={styles.loadZoneIcon}>♫</Text>
           <Text style={styles.loadZoneText}>TAP TO LOAD TRACK</Text>
         </Pressable>
       )}
 
-      {/* Transport */}
-      <View style={styles.transport}>
+      {/* Transport + metadata row */}
+      <View style={styles.bottomRow}>
+        {/* Play / pause */}
         <Pressable
           style={[styles.playBtn, !track && styles.playBtnDim]}
           onPress={onToggle}
@@ -85,6 +107,27 @@ export const DeckCard: React.FC<DeckCardProps> = ({
         >
           <Text style={styles.playBtnGlyph}>{playing ? '⏸' : '▶'}</Text>
         </Pressable>
+
+        {/* Key badge — tap to open picker */}
+        <Pressable
+          style={[styles.keyBadge, { borderColor: kColor }]}
+          onPress={onOpenKeyPicker}
+          accessibilityRole="button"
+          accessibilityLabel={musicKey ? `Key: ${musicKey}, tap to change` : 'Set key'}
+        >
+          {musicKey ? (
+            <>
+              <View style={[styles.keyDot, { backgroundColor: kColor }]} />
+              <Text style={[styles.keyCode, { color: kColor }]}>{musicKey}</Text>
+              <Text style={styles.keyMusical}>{keyName(musicKey)}</Text>
+            </>
+          ) : (
+            <Text style={styles.keyEmpty}>SET KEY</Text>
+          )}
+        </Pressable>
+
+        {/* Tap tempo */}
+        <TapTempoBtn bpm={bpm} onTap={onTapTempo} />
       </View>
     </View>
   );
@@ -162,11 +205,11 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   tc: { fontFamily: fonts.mono, fontSize: 10, color: colors.muted2 },
-  transport: {
+  bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 10,
-    gap: 10,
+    gap: 8,
   },
   playBtn: {
     width: 38,
@@ -178,4 +221,18 @@ const styles = StyleSheet.create({
   },
   playBtnDim: { opacity: 0.35 },
   playBtnGlyph: { fontSize: 16, color: colors.onAccent },
+  keyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flex: 1,
+  },
+  keyDot: { width: 7, height: 7, borderRadius: 4 },
+  keyCode: { fontFamily: fonts.monoBold, fontSize: 13 },
+  keyMusical: { fontFamily: fonts.mono, fontSize: 10, color: colors.muted, flex: 1 },
+  keyEmpty: { fontFamily: fonts.monoBold, fontSize: 10, color: colors.muted2, letterSpacing: 1 },
 });
