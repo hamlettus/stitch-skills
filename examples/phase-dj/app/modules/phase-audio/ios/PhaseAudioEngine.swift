@@ -160,6 +160,11 @@ final class PhaseAudioEngine {
     let remaining = AVAudioFrameCount(max(0, d.totalFrames - from))
     guard remaining > 0 else { return }
 
+    // stop() clears any schedule left over from a previous pause. Without it
+    // the old segment resumes *and* this one queues behind it, playing twice.
+    // It also rebases playerTime to 0, which segmentStartFrame accounts for.
+    d.player.stop()
+
     d.segmentStartFrame = from
     d.player.scheduleSegment(file, startingFrame: from, frameCount: remaining, at: nil)
     d.player.play()
