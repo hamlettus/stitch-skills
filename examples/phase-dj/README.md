@@ -56,16 +56,16 @@ component passes the skill's `scripts/validate.js`, and `tsc --noEmit` is clean.
   the BPM (`src/hooks/useDeck.ts`).
 - **Key picker** — assign any of the 24 Camelot keys to a deck; the deck's
   waveform recolours to that key's hue.
-- **Recording** — capture the mix through the mic and publish it to your Feed,
-  tagged with both decks' keys and the BPM (`src/hooks/useRecorder.ts`).
+- **Recording** — capture the internal mix (decks + crossfader + sampler, no
+  mic) and publish it to your Feed, tagged with both decks' keys and the BPM.
 - **Camelot wheel** — tap any of the 24 keys; compatible keys light up and the
   match list recomputes live. Deck A / Deck B shortcut buttons snap the wheel to
   whatever is loaded.
 - **Crate** — search, filter chips, and dynamic **♥ Deck A / ♥ Deck B** chips that
   narrow the list to harmonically compatible tracks only. Tapping a track jumps
   to the Wheel on that key.
-- **Sampler** — 12 pads trigger synthesized drum one-shots (`expo-av` + haptics).
-  Audio is generated, bundled WAVs in `app/assets/audio/`.
+- **Sampler** — 12 pads trigger synthesized drum one-shots through the engine's
+  8-voice pool, so hits land in the recording. Bundled WAVs in `app/assets/audio/`.
 
 ### The loop
 
@@ -79,36 +79,61 @@ cross-tab wheel jumps) and `src/context/MixesContext.tsx` (recorded mixes).
 - **DRM'd streaming tracks** (Apple Music, Spotify) are not readable by third-party
   apps. The library picker surfaces downloaded and purchased files only; use the
   file picker fallback for anything else.
-- **Recording captures the microphone**, not the internal audio bus — iOS does not
-  expose internal capture to third-party apps. Play the mix out loud, or route it
-  through an audio interface.
+- **Requires a development build.** The native audio engine cannot load in Expo Go.
 - **The Feed is local.** Mixes persist on-device via AsyncStorage. Sharing to other
   users needs a backend (see below).
 
-### Run it on your iPhone (no App Store needed)
+### The audio engine — `app/modules/phase-audio/`
 
-1. Install the **Expo Go** app from the App Store on your iPhone.
-2. On your computer:
-   ```bash
-   cd examples/phase-dj/app
-   npm install
-   npx expo start
-   ```
-3. Scan the QR code in the terminal with your iPhone camera → it opens in Expo Go.
+PHASE runs a custom **AVAudioEngine** graph written in Swift, not a stock player:
 
-> Pinned to Expo SDK 51. If your Expo Go is on a newer SDK, run
-> `npx expo install expo@latest && npx expo install --fix` to realign versions.
+```
+deckA.player → deckA.gain ┐
+deckB.player → deckB.gain ┼→ mainMixerNode → output
+sampler voices ───────────┘         │
+                                    └─ tap → AAC file (the recorded mix)
+```
+
+Two consequences matter:
+
+- **Recording captures the internal mix**, not a microphone. The tap sits on the
+  main mixer, so it hears the decks, the crossfader position, and sampler hits
+  exactly as you do — no room noise, and **no microphone permission**.
+- **It exposes PCM**, which is the prerequisite for on-device key/BPM detection
+  (the next stage). `expo-av` never hands you sample buffers.
+
+### Run it on your iPhone
+
+This needs a **development build** — Expo Go cannot load custom native modules.
+The app detects this and shows an in-app notice rather than failing silently.
+
+```bash
+cd examples/phase-dj/app
+npm install
+npx expo run:ios          # builds + installs a dev client (needs Xcode + a Mac)
+```
+
+No Mac? Use an EAS cloud build instead:
+
+```bash
+npx eas build --profile development --platform ios
+```
+
+After the first native build, day-to-day JS changes reload normally with
+`npx expo start` — you only rebuild when native code or dependencies change.
+
+> Pinned to Expo SDK 51.
 
 ### Still to build (staged)
 
-1. **On-device analysis** — automatic key / BPM / energy detection on load
-   (Essentia/aubio-style DSP or a Core ML model), replacing tap tempo and the
-   manual key picker with real detection.
-2. **Beat-matching** — time-stretch and key-lock so the crossfader blends
-   tempo-aligned tracks rather than mixing raw volumes.
+1. **On-device analysis** — automatic key / BPM / energy detection on load,
+   replacing tap tempo and the manual key picker. The engine already exposes the
+   PCM this needs.
+2. **Beat-matching** — an `AVAudioUnitTimePitch` per deck for time-stretch and
+   key-lock, so the crossfader blends tempo-aligned tracks.
 3. **Backend** — accounts, a networked feed, mix hosting, and remix lineage, so
    the Feed reaches beyond this device.
-4. **Export** — render a mix to a shareable file rather than a mic capture.
+4. **Export** — offline (faster-than-realtime) render of a mix, plus share sheet.
 
 ---
 

@@ -11,15 +11,15 @@
       "supportsTablet": false,
       "bundleIdentifier": "app.phase.dj",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "PHASE records your mixes so you can publish them to your feed.",
         "NSAppleMusicUsageDescription": "PHASE reads your music library so you can load your own tracks onto the decks.",
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
       "package": "app.phase.dj",
       "permissions": [
-        "RECORD_AUDIO",
         "READ_EXTERNAL_STORAGE",
         "READ_MEDIA_AUDIO"
       ]
@@ -37,7 +37,8 @@
           "savePhotosPermission": false,
           "isAccessMediaLocationEnabled": false
         }
-      ]
+      ],
+      "expo-dev-client"
     ]
   }
 }

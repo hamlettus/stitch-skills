@@ -16,6 +16,8 @@ import { useSampler } from '@/hooks/useSampler';
 import { useRecorder } from '@/hooks/useRecorder';
 import { useDeckContext } from '@/context/DeckContext';
 import { useMixes } from '@/context/MixesContext';
+import { PhaseAudio } from '../../modules/phase-audio';
+import { EngineNotice } from '@/components/molecules/EngineNotice';
 import { PadDef, LibraryTrack } from '@/types';
 
 export interface StudioScreenProps {
@@ -32,8 +34,8 @@ function crossfadeVolumes(cf: number): [number, number] {
 type DeckTarget = 'A' | 'B' | null;
 
 export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set' }) => {
-  const deckA = useDeck();
-  const deckB = useDeck();
+  const deckA = useDeck('A');
+  const deckB = useDeck('B');
   const { trigger } = useSampler();
   const recorder = useRecorder();
   const navigation = useNavigation<any>();
@@ -42,6 +44,11 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
   const [keyTarget, setKeyTarget] = useState<DeckTarget>(null);
   const [libTarget, setLibTarget] = useState<DeckTarget>(null);
   const { setDeckAKey, setDeckABpm, setDeckBKey, setDeckBBpm } = useDeckContext();
+
+  // Bring up the native audio graph once for the whole screen
+  useEffect(() => {
+    if (PhaseAudio.available) void PhaseAudio.prepare().catch(() => undefined);
+  }, []);
 
   // Mirror deck characterization into shared context so Wheel + Crate can react
   useEffect(() => { setDeckAKey(deckA.musicKey); }, [deckA.musicKey, setDeckAKey]);
@@ -94,10 +101,11 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <ScreenHeader eyebrow={setName} title="Studio" />
 
+        {!PhaseAudio.available && <EngineNotice />}
+
         <RecordBar
           recording={recorder.recording}
           elapsedMs={recorder.elapsedMs}
-          permissionDenied={recorder.permissionDenied}
           onToggle={() => void onRecordToggle()}
         />
 

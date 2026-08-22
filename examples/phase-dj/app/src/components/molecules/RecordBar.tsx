@@ -5,7 +5,6 @@ import { colors, fonts, radius, space } from '@/theme';
 export interface RecordBarProps {
   readonly recording: boolean;
   readonly elapsedMs: number;
-  readonly permissionDenied: boolean;
   readonly onToggle: () => void;
 }
 
@@ -17,7 +16,6 @@ const formatElapsed = (ms: number): string => {
 export const RecordBar: React.FC<RecordBarProps> = ({
   recording,
   elapsedMs,
-  permissionDenied,
   onToggle,
 }) => {
   const pulse = useRef(new Animated.Value(1)).current;
@@ -55,11 +53,9 @@ export const RecordBar: React.FC<RecordBarProps> = ({
       <View style={styles.textCol}>
         <Text style={styles.title}>{recording ? 'Recording mix' : 'Record your mix'}</Text>
         <Text style={styles.sub}>
-          {permissionDenied
-            ? 'Microphone access denied — enable it in Settings'
-            : recording
-              ? 'Tap stop to save it to your feed'
-              : 'Captures through the mic — play out loud'}
+          {recording
+            ? 'Tap stop to save it to your feed'
+            : 'Captures the mix internally — no mic needed'}
         </Text>
       </View>
 

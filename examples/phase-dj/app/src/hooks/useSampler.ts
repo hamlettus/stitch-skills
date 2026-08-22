@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { Audio } from 'expo-av';
+import { Asset } from 'expo-asset';
+import { PhaseAudio } from '../../modules/phase-audio';
 
 export type SoundName = 'kick' | 'snare' | 'hat' | 'clap' | 'tom';
 
@@ -12,41 +13,40 @@ const SOURCES: Record<SoundName, number> = {
 };
 
 /**
- * Preloads the drum one-shots and returns a `trigger` that plays one immediately.
- * Real audio via expo-av — pads make sound on tap.
+ * Loads the drum one-shots into the native engine's voice pool and returns a
+ * `trigger` that fires one immediately.
+ *
+ * Routing pads through the engine (rather than a separate player) is what puts
+ * them into the recorded mix.
  */
 export function useSampler() {
-  const soundsRef = useRef<Partial<Record<SoundName, Audio.Sound>>>({});
+  const readyRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    const store = soundsRef.current;
 
     (async () => {
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
+      if (!PhaseAudio.available) return;
       for (const name of Object.keys(SOURCES) as SoundName[]) {
-        const { sound } = await Audio.Sound.createAsync(SOURCES[name], { volume: 1.0 });
-        if (cancelled) {
-          await sound.unloadAsync();
-          return;
-        }
-        store[name] = sound;
+        // Bundled assets must be downloaded to a local file before the native
+        // side can open them.
+        const asset = Asset.fromModule(SOURCES[name]);
+        await asset.downloadAsync();
+        if (cancelled) return;
+        const uri = asset.localUri ?? asset.uri;
+        await PhaseAudio.loadSample(name, uri);
       }
+      if (!cancelled) readyRef.current = true;
     })();
 
     return () => {
       cancelled = true;
-      Object.values(store).forEach((s) => {
-        void s?.unloadAsync();
-      });
     };
   }, []);
 
   const trigger = async (name: SoundName) => {
-    const sound = soundsRef.current[name];
-    if (sound) {
-      await sound.replayAsync();
-    }
+    if (!readyRef.current) return;
+    await PhaseAudio.triggerSample(name);
   };
 
   return { trigger };
