@@ -9,6 +9,7 @@ import { ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold } f
 import { SpaceMono_400Regular, SpaceMono_700Bold } from '@expo-google-fonts/space-mono';
 import { colors } from '@/theme';
 import { RootTabs } from '@/navigation/RootTabs';
+import { DeckProvider } from '@/context/DeckContext';
 
 export interface AppProps {}
 
@@ -43,10 +44,12 @@ export default function App(_props: AppProps) {
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer theme={navTheme}>
-        <StatusBar style="light" />
-        <RootTabs />
-      </NavigationContainer>
+      <DeckProvider>
+        <NavigationContainer theme={navTheme}>
+          <StatusBar style="light" />
+          <RootTabs />
+        </NavigationContainer>
+      </DeckProvider>
     </SafeAreaProvider>
   );
 }

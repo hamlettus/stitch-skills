@@ -10,6 +10,7 @@ import { SamplerGrid } from '@/components/organisms/SamplerGrid';
 import { SectionLabel } from '@/components/atoms/SectionLabel';
 import { useDeck } from '@/hooks/useDeck';
 import { useSampler } from '@/hooks/useSampler';
+import { useDeckContext } from '@/context/DeckContext';
 import { PadDef } from '@/types';
 
 export interface StudioScreenProps {
@@ -31,6 +32,13 @@ export const StudioScreen: React.FC<StudioScreenProps> = ({ setName = 'Live Set'
   const { trigger } = useSampler();
   const [crossfade, setCrossfade] = useState(0.5);
   const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
+  const { setDeckAKey, setDeckABpm, setDeckBKey, setDeckBBpm } = useDeckContext();
+
+  // Mirror deck characterization into shared context so Wheel + Crate can react
+  useEffect(() => { setDeckAKey(deckA.musicKey); }, [deckA.musicKey, setDeckAKey]);
+  useEffect(() => { setDeckABpm(deckA.bpm); }, [deckA.bpm, setDeckABpm]);
+  useEffect(() => { setDeckBKey(deckB.musicKey); }, [deckB.musicKey, setDeckBKey]);
+  useEffect(() => { setDeckBBpm(deckB.bpm); }, [deckB.bpm, setDeckBBpm]);
 
   // Sync volumes on crossfade change
   useEffect(() => {
