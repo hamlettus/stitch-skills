@@ -9,6 +9,7 @@ node structure.test.js  # section segmentation + cue points
 node order.test.js      # set ordering
 node arrange.test.js    # clip placement + crossfade math
 node bulk.test.js       # bulk add: chaining, cue alignment, source bounds
+node tempo.test.js      # stretch rates, source-span mapping, beat-grid alignment
 ```
 
 **dsp** synthesises chord progressions with a known key and tempo and checks
@@ -27,6 +28,11 @@ getting stranded from a fixed start.
 overlaps the last, stays inside its source, and — the one that caught a real bug
 — that every crossfade finishes by its own mix-in cue. It was running 31 seconds
 into a track with a 24-second intro.
+
+**tempo** checks the stretch rate maths, that timeline length and source span
+stay correctly related under a rate, and that beat alignment puts downbeats on
+the mix grid. Caught the start-of-mix case: a clip at time zero whose correction
+went negative got clamped to 0 and stayed off-grid — it now steps a bar forward.
 
 **arrange** places three clips and verifies each overlap matches its crossfade,
 that `gainA² + gainB²` holds at 1 through every blend (equal-power — a linear

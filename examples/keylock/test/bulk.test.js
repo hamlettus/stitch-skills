@@ -9,6 +9,10 @@ function grab(m){
 function stmt(m){ const i=src.indexOf(m); return src.slice(i, src.indexOf(';\n',i)+1); }
 
 let clips=[]; const tracksById={}; let selectedClipId=null;
+// stubs for collaborators addClips touches but this suite doesn't exercise
+let mixBpm=null;                 // tempo matching has its own suite
+function pushUndo(){}
+function alignToGrid(){}
 function trackById(id){return tracksById[id]||null;}
 let idc=0; function newId(){return 'c'+(++idc);}
 function renderAll(){} function save(){}

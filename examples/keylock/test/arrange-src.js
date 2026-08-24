@@ -662,6 +662,39 @@
     } catch (e) { /* nothing to do */ }
   }
 
+  var undoStack = [];
+  var UNDO_DEPTH = 25;
+
+  /** Snapshot the arrangement before a mutation so it can be walked back. */
+  function pushUndo() {
+    try {
+      undoStack.push(JSON.stringify({ clips: clips, mixBpm: mixBpm }));
+      if (undoStack.length > UNDO_DEPTH) undoStack.shift();
+    } catch (e) { /* nothing worth breaking over */ }
+    refreshUndoBtn();
+  }
+
+  function undo() {
+    if (!undoStack.length) return;
+    var snap = undoStack.pop();
+    try {
+      var st = JSON.parse(snap);
+      clips = st.clips || [];
+      mixBpm = st.mixBpm != null ? st.mixBpm : null;
+    } catch (e) { return; }
+    stopPlayback(false);
+    selectedClipId = null;
+    renderAll();
+    save();
+    refreshUndoBtn();
+  }
+
+  function refreshUndoBtn() {
+    var b = document.getElementById('a-undo');
+    if (b) b.disabled = undoStack.length === 0;
+  }
+
+  var query = '';       // library filter
   var selection = {};   // track id -> true, for bulk actions
   var tracks = [];   // analysed library metadata
   var clips = [];    // the arrangement
@@ -684,7 +717,7 @@
           peaks: t.peaks ? Array.from(t.peaks).map(function (p) { return Math.round(p * 255); }) : null
         };
       })));
-      localStorage.setItem(ARR_KEY, JSON.stringify(clips));
+      localStorage.setItem(ARR_KEY, JSON.stringify({ clips: clips, mixBpm: mixBpm }));
     } catch (e) { /* quota / private mode — still fine in memory */ }
   }
 
@@ -703,7 +736,12 @@
       var rawArr = localStorage.getItem(ARR_KEY);
       if (rawArr) {
         var a = JSON.parse(rawArr);
-        if (Array.isArray(a)) clips = a;
+        if (Array.isArray(a)) {
+          clips = a;                      // pre-tempo format
+        } else if (a && Array.isArray(a.clips)) {
+          clips = a.clips;
+          mixBpm = a.mixBpm != null ? a.mixBpm : null;
+        }
       }
     } catch (e) { tracks = []; clips = []; }
   }
@@ -714,6 +752,43 @@
       if (f) blobs[tracks[i].id] = f;
     }
     renderAll();
+  }
+
+  /** Remove tracks from the library, their audio, and any clips using them. */
+  function deleteTracks(ids, opts) {
+    if (!ids.length) return;
+    opts = opts || {};
+    var used = ids.filter(function (id) { return clipsForTrack(id) > 0; });
+
+    if (!opts.skipConfirm) {
+      var what = ids.length === 1
+        ? '"' + ((trackById(ids[0]) || {}).title || 'this track') + '"'
+        : ids.length + ' tracks';
+      var msg = 'Remove ' + what + ' from the library?';
+      if (used.length) {
+        msg += '\n\n' + (used.length === 1 ? 'It is' : used.length + ' of them are') +
+          ' in the arrangement — those clips go too.';
+      }
+      if (!confirm(msg)) return;
+    }
+
+    if (used.length) pushUndo();
+
+    var set = {};
+    ids.forEach(function (id) { set[id] = true; });
+
+    clips = clips.filter(function (c) { return !set[c.trackId]; });
+    tracks = tracks.filter(function (t) { return !set[t.id]; });
+    ids.forEach(function (id) {
+      delete blobs[id];
+      delete selection[id];
+      delBlob(id);
+    });
+    if (selectedClipId && !clips.some(function (c) { return c.id === selectedClipId; })) {
+      selectedClipId = null;
+    }
+    renderAll();
+    save();
   }
 
   function trackById(id) {
@@ -862,6 +937,70 @@
   // ============================================================
 
   var DEFAULT_XFADE = 12;
+  var MAX_STRETCH = 0.08;      // ±8%; past this, time-stretch artefacts show
+  var mixBpm = null;           // null = every clip plays at its own tempo
+
+  /**
+   * Playback rate for a clip under the mix tempo.
+   *
+   * `lengthSec` is TIMELINE time. Source consumed is `lengthSec * rate`, so a
+   * clip sped up covers more of its file in the same span. Everything that
+   * maps between mix time and source time goes through here.
+   */
+  function clipRate(c) {
+    if (!mixBpm) return 1;
+    var t = trackById(c.trackId);
+    if (!t || !t.bpm) return 1;
+    var r = mixBpm / t.bpm;
+    if (Math.abs(r - 1) > MAX_STRETCH) return 1;   // too far to stretch cleanly
+    return r;
+  }
+
+  /** True when the mix tempo is on but this track is too far away to match. */
+  function clipUnmatched(c) {
+    if (!mixBpm) return false;
+    var t = trackById(c.trackId);
+    if (!t || !t.bpm) return true;
+    return Math.abs(mixBpm / t.bpm - 1) > MAX_STRETCH;
+  }
+
+  /** Source seconds this clip consumes. */
+  function clipSourceSpan(c) { return c.lengthSec * clipRate(c); }
+
+  /**
+   * Nudge a clip (by under a bar) so one of its downbeats lands on the mix
+   * grid. Matched tempo alone still sounds wrong if the bar lines are offset —
+   * this is what makes a transition read as beatmatched rather than layered.
+   */
+  function alignToGrid(c) {
+    if (!mixBpm) return;
+    var t = trackById(c.trackId);
+    if (!t || !t.bpm) return;
+    var rate = clipRate(c);
+    var srcBar = (60 / t.bpm) * 4;
+    var mixBar = (60 / mixBpm) * 4;
+    var phase = t.beatPhase || 0;
+
+    // Downbeat of the source nearest this clip's in-point
+    var db = phase + Math.round((c.offsetSec - phase) / srcBar) * srcBar;
+    if (db < 0) db += srcBar;
+
+    var atMix = c.startSec + (db - c.offsetSec) / rate;
+    var resid = atMix - Math.round(atMix / mixBar) * mixBar;
+    var next = c.startSec - resid;
+    // Nudging back would cross zero for a clip at the very start, so step
+    // forward a bar instead — the mix just begins a fraction of a bar later.
+    while (next < 0) next += mixBar;
+    c.startSec = Math.round(next * 1000) / 1000;
+  }
+
+  function medianBpm(list) {
+    var bs = list.map(function (t) { return t.bpm; })
+      .filter(function (b) { return b; })
+      .sort(function (a, b) { return a - b; });
+    if (!bs.length) return null;
+    return Math.round(bs[Math.floor(bs.length / 2)] * 10) / 10;
+  }
 
   function addClip(trackId) {
     var t = trackById(trackId);
@@ -902,6 +1041,7 @@
    */
   function addClips(trackIds) {
     var added = 0;
+    if (trackIds.length) pushUndo();
     trackIds.forEach(function (id) {
       var t = trackById(id);
       if (!t || !t.durationSec) return;
@@ -944,6 +1084,7 @@
       added++;
     });
     if (added) {
+      if (mixBpm) clips.forEach(function (c) { alignToGrid(c); });
       selectedClipId = null;
       renderAll();
       save();
@@ -1180,9 +1321,14 @@
     if (clips.length && !confirm('Replace the current arrangement with an auto-built one?')) return;
 
     stopPlayback(false);
+    pushUndo();
     var split = splitMisfits(pool);
     var order = orderTracks(split.core);
     lastMisfits = split.misfits;
+
+    // Run the whole set at one tempo, taken from the middle of the pack so the
+    // least stretching is needed overall.
+    mixBpm = medianBpm(order);
 
     clips = [];
     var cursor = 0;
@@ -1221,11 +1367,14 @@
       cursor = start + length;
     }
 
+    if (mixBpm) clips.forEach(function (c) { alignToGrid(c); });
+
     selectedClipId = null;
     renderAll();
     save();
     selectTab('arrange');
     var msg = 'Arranged ' + order.length + ' tracks · ' + fmtTime(arrangementEnd());
+    if (mixBpm) msg += ' @ ' + mixBpm + ' BPM';
     if (lastMisfits.length) {
       msg += ' · left out ' + lastMisfits.length +
         (lastMisfits.length === 1 ? ' misfit' : ' misfits');
@@ -1317,13 +1466,25 @@
         v.clipId = c.id;
         v.url = URL.createObjectURL(f);
         v.audio.src = v.url;
-        var seek = c.offsetSec + Math.max(0, t - c.startSec);
+        var rate = clipRate(c);
+        var seek = c.offsetSec + Math.max(0, t - c.startSec) * rate;
         try { v.audio.currentTime = seek; } catch (e) {}
+        try {
+          v.audio.preservesPitch = true;          // keep the key the app reported
+          v.audio.playbackRate = rate;
+        } catch (e) {}
         var p = v.audio.play();
         if (p && p.catch) p.catch(function () {});
       } else {
         // Nudge back into sync if the element has drifted.
-        var want = c.offsetSec + (t - c.startSec);
+        var rate2 = clipRate(c);
+        try {
+          if (Math.abs(v.audio.playbackRate - rate2) > 0.001) {
+            v.audio.preservesPitch = true;
+            v.audio.playbackRate = rate2;
+          }
+        } catch (e) {}
+        var want = c.offsetSec + (t - c.startSec) * rate2;
         if (isFinite(v.audio.currentTime) && Math.abs(v.audio.currentTime - want) > 0.35) {
           try { v.audio.currentTime = want; } catch (e) {}
         }
@@ -1549,6 +1710,92 @@
     document.getElementById('bounced').close();
   });
 
+  /** Plain-text running order, for notes or a tracklist post. */
+  function setlistText() {
+    var ordered = sortedClips();
+    var lines = [];
+    lines.push('KEYLOCK SETLIST');
+    lines.push('Total ' + fmtTime(arrangementEnd()) +
+      (mixBpm ? '   ·   mix tempo ' + mixBpm + ' BPM' : '') +
+      '   ·   ' + ordered.length + ' tracks');
+    lines.push('');
+    ordered.forEach(function (c, i) {
+      var t = trackById(c.trackId);
+      if (!t) return;
+      var num = String(i + 1).padStart(2, '0');
+      var head = num + '.  ' + fmtTime(c.startSec) + '   ' +
+        (t.artist ? t.artist + ' — ' : '') + (t.title || t.filename);
+      var meta = '      ' + (t.key || '--') +
+        (t.key ? ' ' + CAMELOT_NAME[t.key] : '') +
+        '   ' + (t.bpm ? t.bpm.toFixed(1) + ' BPM' : 'BPM ?');
+      var rate = clipRate(c);
+      if (mixBpm && Math.abs(rate - 1) > 0.001) {
+        meta += ' → ' + mixBpm + ' (' + (rate > 1 ? '+' : '−') +
+          (Math.abs(rate - 1) * 100).toFixed(1) + '%)';
+      }
+      if (t.energy) meta += '   energy ' + t.energy;
+      lines.push(head);
+      lines.push(meta);
+      if (i > 0) {
+        var prev = trackById(ordered[i - 1].trackId);
+        if (prev) {
+          var rel = relation(prev.key, t.key);
+          lines.push('      ↑ ' + rel.label + ', ' +
+            Math.round(ordered[i - 1].startSec + ordered[i - 1].lengthSec - c.startSec) +
+            's blend');
+        }
+      }
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
+  function showSetlist() {
+    if (!clips.length) { flash('Nothing arranged yet'); return; }
+    var txt = setlistText();
+    document.getElementById('sl-body').textContent = txt;
+    document.getElementById('sl-sub').textContent =
+      clips.length + ' tracks · ' + fmtTime(arrangementEnd());
+    var dlg = document.getElementById('setlist');
+
+    document.getElementById('sl-copy').onclick = function () {
+      var b = this;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(txt).then(function () {
+          b.textContent = 'Copied';
+          setTimeout(function () { b.textContent = 'Copy'; }, 1500);
+        }).catch(function () { b.textContent = 'Select it above'; });
+      } else {
+        b.textContent = 'Select it above';
+      }
+    };
+    document.getElementById('sl-save').onclick = async function () {
+      var b = this;
+      var name = 'keylock-setlist.txt';
+      var dl = null;
+      if (window.claude && typeof window.claude.use === 'function') {
+        try { dl = await window.claude.use('downloads'); } catch (e) { dl = null; }
+      }
+      if (dl) {
+        b.disabled = true; b.textContent = 'Saving…';
+        try { await dl.save({ filename: name, data: txt }); b.textContent = 'Saved'; }
+        catch (err) {
+          b.disabled = false;
+          b.textContent = (err && err.code === 'declined') ? 'Save .txt' : 'Could not save';
+        }
+        return;
+      }
+      try {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' }));
+        a.download = name;
+        document.body.appendChild(a); a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      } catch (e) { b.textContent = 'Could not save'; }
+    };
+    dlg.showModal();
+  }
+
   // ============================================================
   //  Timeline rendering
   // ============================================================
@@ -1619,6 +1866,13 @@
       el.xfades.appendChild(chip);
     }
 
+    // keep the tempo field and undo button honest
+    var bi = document.getElementById('a-bpm');
+    if (bi && document.activeElement !== bi) bi.value = mixBpm != null ? mixBpm : '';
+    var bw = document.querySelector('.bpmwrap');
+    if (bw) bw.classList.toggle('on', mixBpm != null);
+    refreshUndoBtn();
+
     updatePlayhead();
     updateClock();
     renderInspector();
@@ -1667,10 +1921,31 @@
     var mbits = [];
     if (t && t.key) mbits.push(t.key);
     if (t && t.bpm) mbits.push(t.bpm.toFixed(1));
+    var rate = clipRate(c);
+    if (mixBpm && Math.abs(rate - 1) > 0.001) {
+      mbits.push((rate > 1 ? '+' : '−') + (Math.abs(rate - 1) * 100).toFixed(1) + '%');
+    } else if (clipUnmatched(c)) {
+      mbits.push('OFF-TEMPO');
+    }
     mbits.push(fmtTime(c.lengthSec));
     if (!blobs[c.trackId]) mbits.push('NO AUDIO');
     meta.textContent = mbits.join(' · ');
     node.appendChild(meta);
+
+    if (c.id === selectedClipId) {
+      var x = document.createElement('button');
+      x.className = 'clipdel';
+      x.type = 'button';
+      x.textContent = '✕';
+      x.setAttribute('aria-label', 'Remove this clip');
+      x.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+      x.addEventListener('click', function (e) {
+        e.stopPropagation();
+        pushUndo();
+        removeClip(c.id);
+      });
+      node.appendChild(x);
+    }
 
     var hl = document.createElement('div'); hl.className = 'handle l';
     var hr = document.createElement('div'); hr.className = 'handle r';
@@ -1696,10 +1971,11 @@
     if (t && t.sections && t.durationSec) {
       t.sections.forEach(function (sec) {
         var a = Math.max(sec.startSec, c.offsetSec);
-        var b = Math.min(sec.endSec, c.offsetSec + c.lengthSec);
+        var span = clipSourceSpan(c);
+        var b = Math.min(sec.endSec, c.offsetSec + span);
         if (b <= a) return;
-        var x0 = ((a - c.offsetSec) / c.lengthSec) * w;
-        var x1 = ((b - c.offsetSec) / c.lengthSec) * w;
+        var x0 = ((a - c.offsetSec) / span) * w;
+        var x1 = ((b - c.offsetSec) / span) * w;
         g.fillStyle = SECTION_COLOR[sec.kind] || '#3A4050';
         g.globalAlpha = 0.34;
         g.fillRect(x0, 0, Math.max(1, x1 - x0), h);
@@ -1711,8 +1987,9 @@
     if (t && t.peaks && t.peaks.length && t.durationSec) {
       g.fillStyle = 'rgba(8,9,12,0.30)';
       var n = t.peaks.length;
+      var srcSpan = clipSourceSpan(c);
       for (var x = 0; x < w; x++) {
-        var srcSec = c.offsetSec + (x / w) * c.lengthSec;
+        var srcSec = c.offsetSec + (x / w) * srcSpan;
         var pi = Math.floor((srcSec / t.durationSec) * n);
         if (pi < 0 || pi >= n) continue;
         var mag = Math.pow(t.peaks[pi], 0.7);
@@ -1753,12 +2030,14 @@
         ev.preventDefault();
         ev.stopPropagation();
         selectedClipId = c.id;
+        pushUndo();
         var startX = ev.clientX;
         var orig = { start: c.startSec, off: c.offsetSec, len: c.lengthSec };
         var t = trackById(c.trackId);
         var srcDur = (t && t.durationSec) || c.lengthSec;
         node.setPointerCapture && node.setPointerCapture(ev.pointerId);
 
+        var rate = clipRate(c);
         function move(e2) {
           var d = (e2.clientX - startX) / pxPerSec;
           if (mode === 'move') {
@@ -1766,12 +2045,12 @@
           } else if (mode === 'in') {
             // Trimming the head keeps the tail put: move start and offset together.
             var maxIn = orig.len - 2;
-            var dd = Math.max(-orig.off, Math.min(d, maxIn));
+            var dd = Math.max(-orig.off / rate, Math.min(d, maxIn));
             c.startSec = Math.max(0, orig.start + dd);
-            c.offsetSec = Math.max(0, orig.off + dd);
+            c.offsetSec = Math.max(0, orig.off + dd * rate);
             c.lengthSec = Math.max(2, orig.len - dd);
           } else {
-            var maxLen = srcDur - c.offsetSec;
+            var maxLen = (srcDur - c.offsetSec) / rate;
             c.lengthSec = Math.max(2, Math.min(orig.len + d, maxLen));
           }
           c.fadeInSec = Math.min(c.fadeInSec, c.lengthSec * 0.5);
@@ -1784,6 +2063,7 @@
           window.removeEventListener('pointermove', move);
           window.removeEventListener('pointerup', end);
           window.removeEventListener('pointercancel', end);
+          if (mixBpm) alignToGrid(c);      // land on a bar line
           renderAll();
           save();
         }
@@ -1830,8 +2110,20 @@
     box.appendChild(slider('Level', c.gain, 0, 1, 0.01, '',
       function (v) { c.gain = v; }, function (v) { return Math.round(v * 100) + '%'; }));
     box.appendChild(slider('Start in track', c.offsetSec, 0,
-      Math.max(0, ((t && t.durationSec) || c.lengthSec) - c.lengthSec), 1, 's',
+      Math.max(0, ((t && t.durationSec) || 0) - clipSourceSpan(c)), 1, 's',
       function (v) { c.offsetSec = v; }, function (v) { return fmtTime(v); }));
+
+    if (mixBpm && t && t.bpm) {
+      var note = document.createElement('p');
+      note.className = 'who';
+      note.style.marginTop = '2px';
+      var r = clipRate(c);
+      note.textContent = clipUnmatched(c)
+        ? 'Too far from ' + mixBpm + ' BPM to stretch cleanly — playing at its own tempo.'
+        : 'Stretched ' + (r > 1 ? '+' : '−') + (Math.abs(r - 1) * 100).toFixed(1) +
+          '% to ' + mixBpm + ' BPM, key held.';
+      box.appendChild(note);
+    }
 
     var acts = document.createElement('div');
     acts.className = 'insp-actions';
@@ -1853,7 +2145,7 @@
     del.className = 'tbtn';
     del.type = 'button';
     del.textContent = 'Remove';
-    del.addEventListener('click', function () { removeClip(c.id); });
+    del.addEventListener('click', function () { pushUndo(); removeClip(c.id); });
     acts.appendChild(del);
 
     box.appendChild(acts);
@@ -1984,17 +2276,35 @@
     add.title = 'Add to arrangement';
     add.addEventListener('click', function (e) {
       e.stopPropagation();
-      addClip(t.id);
+      addClips([t.id]);
       selectTab('arrange');
     });
     act.appendChild(add);
+
+    var del = document.createElement('button');
+    del.className = 'iconbtn danger'; del.type = 'button'; del.textContent = '✕';
+    del.setAttribute('aria-label', 'Delete ' + (t.title || t.filename));
+    del.title = 'Delete from library';
+    del.addEventListener('click', function (e) {
+      e.stopPropagation();
+      deleteTracks([t.id]);
+    });
+    act.appendChild(del);
 
     row.appendChild(act);
     return row;
   }
 
+  function matchesQuery(t) {
+    if (!query) return true;
+    var q = query.toLowerCase();
+    return [t.title, t.artist, t.genre, t.key, t.filename,
+            t.bpm ? t.bpm.toFixed(0) : '']
+      .some(function (f) { return f && String(f).toLowerCase().indexOf(q) !== -1; });
+  }
+
   function libSorted() {
-    return tracks.slice().sort(function (a, b) {
+    return tracks.filter(matchesQuery).sort(function (a, b) {
       var ka = a.key ? parseInt(a.key, 10) * 2 + (a.key.slice(-1) === 'B' ? 1 : 0) : 999;
       var kb = b.key ? parseInt(b.key, 10) * 2 + (b.key.slice(-1) === 'B' ? 1 : 0) : 999;
       return ka - kb;
@@ -2006,7 +2316,7 @@
   }
 
   function buildLibBar() {
-    var loadable = tracks.filter(function (t) { return blobs[t.id] && t.durationSec; });
+    var loadable = libSorted().filter(function (t) { return blobs[t.id] && t.durationSec; });
     if (!loadable.length) return null;
 
     var sel = selectedTracks();
@@ -2050,6 +2360,9 @@
         selection = {};
         autoArrange(pick);
       });
+      btn('Delete ' + sel.length, 'danger', function () {
+        deleteTracks(sel.map(function (t) { return t.id; }));
+      });
     } else {
       btn('Add all →', '', function () {
         var pending = loadable.filter(function (t) { return !clipsForTrack(t.id); });
@@ -2073,9 +2386,47 @@
       el.library.appendChild(e);
       return;
     }
+    // search
+    var sb = document.createElement('div');
+    sb.className = 'searchbar';
+    var icon = document.createElement('span');
+    icon.textContent = '⌕';
+    icon.style.color = 'var(--muted)';
+    sb.appendChild(icon);
+    var qi = document.createElement('input');
+    qi.type = 'search';
+    qi.value = query;
+    qi.placeholder = 'Filter by title, artist, key, BPM…';
+    qi.setAttribute('aria-label', 'Filter the library');
+    qi.addEventListener('input', function () {
+      query = qi.value.trim();
+      renderLibrary();
+      var again = el.library.querySelector('.searchbar input');
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+    });
+    sb.appendChild(qi);
+    if (query) {
+      var clr = document.createElement('button');
+      clr.className = 'clr'; clr.type = 'button'; clr.textContent = '✕';
+      clr.setAttribute('aria-label', 'Clear filter');
+      clr.addEventListener('click', function () { query = ''; renderLibrary(); });
+      sb.appendChild(clr);
+    }
+    el.library.appendChild(sb);
+
     var bar = buildLibBar();
     if (bar) el.library.appendChild(bar);
-    libSorted().forEach(function (t) { el.library.appendChild(trackRow(t)); });
+
+    var shown = libSorted();
+    if (!shown.length) {
+      var none = document.createElement('div');
+      none.className = 'empty';
+      none.innerHTML = '<b>Nothing matches</b><p>No track in the library matches “' +
+        query.replace(/</g, '&lt;') + '”.</p>';
+      el.library.appendChild(none);
+      return;
+    }
+    shown.forEach(function (t) { el.library.appendChild(trackRow(t)); });
   }
 
   function renderAll() {
@@ -2311,6 +2662,23 @@
   document.getElementById('a-stop').addEventListener('click', function () { stopPlayback(false); });
   el.bounceBtn.addEventListener('click', function () { bounce(); });
   document.getElementById('a-auto').addEventListener('click', function () { autoArrange(); });
+  document.getElementById('a-undo').addEventListener('click', function () { undo(); });
+  document.getElementById('a-list').addEventListener('click', function () { showSetlist(); });
+  document.getElementById('sl-close').addEventListener('click', function () {
+    document.getElementById('setlist').close();
+  });
+
+  var bpmInput = document.getElementById('a-bpm');
+  bpmInput.addEventListener('change', function () {
+    pushUndo();
+    var v = parseFloat(bpmInput.value);
+    mixBpm = (isFinite(v) && v >= 60 && v <= 200) ? Math.round(v * 10) / 10 : null;
+    if (!isFinite(v)) bpmInput.value = '';
+    if (mixBpm) clips.forEach(function (c) { alignToGrid(c); });
+    stopPlayback(false);
+    renderAll();
+    save();
+  });
 
   el.zoom.addEventListener('input', function () {
     pxPerSec = parseFloat(el.zoom.value);

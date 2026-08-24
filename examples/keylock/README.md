@@ -68,6 +68,28 @@ Anything you set by hand is trusted and never overwritten.
 **Library** — add files, get key / BPM / energy / duration per track, sorted
 around the Camelot wheel. Tap a row to correct anything.
 
+**Tempo matching** — set a **Mix BPM** (Auto-arrange fills it in from the median
+of the set) and every clip is time-stretched to it with `preservesPitch`, so the
+key each track was labelled with stays true. Anything more than ±8% away is left
+at its own tempo and marked `OFF-TEMPO` rather than stretched into artefacts.
+
+**Beat alignment** — matched tempo is only half of it; if the bar lines don't
+coincide the tracks still fight. Each clip is nudged by under a bar so one of its
+downbeats lands on the mix grid, using the beat phase found during analysis.
+`test/tempo.test.js` measures the result: downbeats land within 0.5 ms of the
+grid, and any two clips sit a whole number of bars apart.
+
+**Deleting** — ✕ on any library row removes the track, its audio and any clips
+using it; with a selection, **Delete N** does the lot. A selected clip has its
+own ✕ on the timeline. **↶ Undo** walks back the last 25 arrangement changes.
+
+**Search** — filter the library by title, artist, key, genre or BPM. The bulk
+buttons act on whatever the filter is showing.
+
+**Setlist** — the running order as plain text: position, time, artist, title,
+key, BPM, stretch amount, energy, and the transition into each track. Copy it or
+save a `.txt`.
+
 **Moving tracks across** — a bar at the top of the Library handles the whole
 crate at once: **Add all →** drops every track on the timeline in key order,
 **✦ Auto-arrange all** works out the running order first. Tick individual tracks
@@ -132,8 +154,9 @@ minutes to bounce, with the screen open.
 - **Saving from inside the Claude artifact viewer is capped at 16 MB**, which a
   long mix will exceed. Open `keylock.html` directly in Safari to bounce without
   that limit. The app says so rather than failing quietly.
-- **No time-stretch.** Clips play at their own tempo; the BPM gap on each
-  transition tells you how far apart they are, but nothing beatmatches yet.
+- **Time-stretch quality is the browser's.** `preservesPitch` is fine for the
+  few percent a set needs; it is not a studio algorithm. Past ±8% Keylock stops
+  rather than pretending.
 - **Structure detection assumes dance music.** It keys off bass dropping in and
   out. On material without that shape — live recordings, ambient, most rock —
   sections will be vague and the cues want checking by hand.
@@ -144,8 +167,7 @@ minutes to bounce, with the screen open.
 
 ## Not built yet
 
-- **Time-stretch / beatmatching.** Needs a rate-shifting playback path;
-  `preservesPitch` on the media elements is the cheap first move.
-- **Bass-swap transitions.** A filter per clip with automation across the
-  overlap, rather than gain alone.
-- **Snapping** clip edges to beat boundaries using the detected BPM.
+- **Bass-swap transitions.** A filter per clip automated across the overlap,
+  rather than gain alone — the usual fix for two kicks fighting mid-blend.
+- **Reordering clips as a list**, rather than dragging them along the timeline.
+- **Loop / repeat a section** to extend a short track.
