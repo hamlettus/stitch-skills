@@ -662,6 +662,7 @@
     } catch (e) { /* nothing to do */ }
   }
 
+  var selection = {};   // track id -> true, for bulk actions
   var tracks = [];   // analysed library metadata
   var clips = [];    // the arrangement
   var blobs = {};    // id -> File, hydrated from IndexedDB on load
@@ -895,6 +896,65 @@
     save();
   }
 
+  /**
+   * Append several tracks at once, each crossfaded into the one before, using
+   * their mix-in / mix-out cues where the analysis found them.
+   */
+  function addClips(trackIds) {
+    var added = 0;
+    trackIds.forEach(function (id) {
+      var t = trackById(id);
+      if (!t || !t.durationSec) return;
+
+      var tail = 0, last = null;
+      clips.forEach(function (c) {
+        var end = c.startSec + c.lengthSec;
+        if (end >= tail) { tail = end; last = c; }
+      });
+      var lastTrack = last ? trackById(last.trackId) : null;
+
+      var inSec = (t.mixInSec != null) ? t.mixInSec : 0;
+      var outSec = (t.mixOutSec != null) ? t.mixOutSec : t.durationSec;
+      if (outSec <= inSec + 20) { inSec = 0; outSec = t.durationSec; }
+
+      var xf = last ? crossfadeFor(lastTrack || t, t) : 0;
+      if (last) {
+        xf = clampXfade(xf, inSec);
+        xf = Math.min(xf, (outSec - inSec) * 0.4, last.lengthSec * 0.4);
+      }
+
+      var lead = Math.min(xf, inSec);
+      var offset = inSec - lead;
+      var length = Math.min(t.durationSec - offset, (outSec - offset) + 12);
+      if (length < 20) { offset = 0; length = Math.min(t.durationSec, 120); }
+
+      var start = last ? Math.max(0, tail - xf) : 0;
+      if (last) last.fadeOutSec = Math.min(xf, last.lengthSec * 0.5);
+
+      clips.push({
+        id: newId(),
+        trackId: id,
+        startSec: Math.round(start * 100) / 100,
+        offsetSec: Math.round(offset * 100) / 100,
+        lengthSec: Math.round(length * 100) / 100,
+        fadeInSec: Math.round(Math.min(xf, length * 0.5) * 100) / 100,
+        fadeOutSec: Math.round(Math.min(last ? xf : Math.min(12, length * 0.25), length * 0.5) * 100) / 100,
+        gain: 1
+      });
+      added++;
+    });
+    if (added) {
+      selectedClipId = null;
+      renderAll();
+      save();
+    }
+    return added;
+  }
+
+  function clipsForTrack(id) {
+    return clips.filter(function (c) { return c.trackId === id; }).length;
+  }
+
   function removeClip(id) {
     clips = clips.filter(function (c) { return c.id !== id; });
     if (selectedClipId === id) selectedClipId = null;
@@ -1091,6 +1151,17 @@
     return best || pool.slice();
   }
 
+  /**
+   * A crossfade should be finished by the time the incoming track's mix-in cue
+   * lands, so the track is at full level when its body starts. That caps the
+   * fade at the length of the intro it hides under — a track with a short
+   * intro simply gets a shorter blend.
+   */
+  function clampXfade(xf, introSec) {
+    var room = introSec > 0 ? introSec : 0;
+    return Math.max(4, Math.min(xf, room > 4 ? room : 4));
+  }
+
   /** Crossfade length for a pair, in seconds, rounded to whole bars. */
   function crossfadeFor(a, b) {
     var bpm = (a && a.bpm) || (b && b.bpm) || 124;
@@ -1102,8 +1173,9 @@
     return Math.max(4, Math.min(48, bar * bars));
   }
 
-  function autoArrange() {
-    var pool = tracks.filter(function (t) { return blobs[t.id] && t.durationSec; });
+  function autoArrange(subset) {
+    var pool = (subset && subset.length ? subset : tracks)
+      .filter(function (t) { return blobs[t.id] && t.durationSec; });
     if (pool.length < 2) { flash('Add at least two analysed tracks first'); return; }
     if (clips.length && !confirm('Replace the current arrangement with an auto-built one?')) return;
 
@@ -1121,7 +1193,7 @@
       if (outSec <= inSec) { inSec = 0; outSec = t.durationSec; }
 
       var prev = order[i - 1];
-      var xfIn = i === 0 ? 0 : crossfadeFor(prev, t);
+      var xfIn = i === 0 ? 0 : clampXfade(crossfadeFor(prev, t), inSec);
       var xfOut = i === order.length - 1
         ? Math.min(12, (outSec - inSec) * 0.25)
         : crossfadeFor(t, order[i + 1]);
@@ -1555,7 +1627,7 @@
     if (!clips.length) {
       var e = document.createElement('div');
       e.className = 'empty';
-      e.innerHTML = '<b>Nothing arranged yet</b><p>Tap <b>Auto-arrange</b> to have Keylock order your tracks and cut them cue to cue — or add them one at a time with → in the Library.</p>';
+      e.innerHTML = '<b>Nothing arranged yet</b><p>In the Library, <b>Add all →</b> drops every track on the timeline in key order, and <b>✦ Auto-arrange all</b> works out the running order first. Tick individual tracks to do just those.</p>';
       el.arrEmpty.appendChild(e);
     } else if (lastMisfits.length) {
       var m = document.createElement('div');
@@ -1848,6 +1920,13 @@
     var title = document.createElement('div');
     title.className = 'title';
     title.textContent = t.title || t.filename;
+    var nClips = clipsForTrack(t.id);
+    if (nClips) {
+      var badge = document.createElement('span');
+      badge.className = 'inmix';
+      badge.textContent = nClips > 1 ? 'IN MIX ×' + nClips : 'IN MIX';
+      title.appendChild(badge);
+    }
     main.appendChild(title);
 
     var sub = document.createElement('div');
@@ -1876,6 +1955,22 @@
     var act = document.createElement('div');
     act.className = 'rowact';
 
+    var chk = document.createElement('button');
+    chk.className = 'check';
+    chk.type = 'button';
+    chk.textContent = '✓';
+    var on = !!selection[t.id];
+    if (on) chk.dataset.on = '1';
+    chk.setAttribute('aria-label', (on ? 'Deselect ' : 'Select ') + (t.title || t.filename));
+    chk.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (!blobs[t.id]) { chk.disabled = true; chk.title = 'Re-add this file first'; }
+    chk.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (selection[t.id]) delete selection[t.id]; else selection[t.id] = true;
+      renderLibrary();
+    });
+    act.appendChild(chk);
+
     var play = document.createElement('button');
     play.className = 'iconbtn'; play.type = 'button'; play.textContent = '▶';
     play.setAttribute('aria-label', 'Preview ' + (t.title || t.filename));
@@ -1898,6 +1993,77 @@
     return row;
   }
 
+  function libSorted() {
+    return tracks.slice().sort(function (a, b) {
+      var ka = a.key ? parseInt(a.key, 10) * 2 + (a.key.slice(-1) === 'B' ? 1 : 0) : 999;
+      var kb = b.key ? parseInt(b.key, 10) * 2 + (b.key.slice(-1) === 'B' ? 1 : 0) : 999;
+      return ka - kb;
+    });
+  }
+
+  function selectedTracks() {
+    return libSorted().filter(function (t) { return selection[t.id] && blobs[t.id]; });
+  }
+
+  function buildLibBar() {
+    var loadable = tracks.filter(function (t) { return blobs[t.id] && t.durationSec; });
+    if (!loadable.length) return null;
+
+    var sel = selectedTracks();
+    var bar = document.createElement('div');
+    bar.className = 'libbar' + (sel.length ? ' active' : '');
+
+    var lbl = document.createElement('div');
+    lbl.className = 'lbl';
+    lbl.textContent = sel.length
+      ? sel.length + ' of ' + loadable.length + ' selected'
+      : loadable.length + ' ready to arrange';
+    bar.appendChild(lbl);
+
+    function btn(text, cls, fn) {
+      var b = document.createElement('button');
+      b.className = 'tbtn' + (cls ? ' ' + cls : '');
+      b.type = 'button';
+      b.textContent = text;
+      b.addEventListener('click', fn);
+      bar.appendChild(b);
+      return b;
+    }
+
+    var allOn = sel.length === loadable.length;
+    btn(allOn ? 'Select none' : 'Select all', '', function () {
+      selection = {};
+      if (!allOn) loadable.forEach(function (t) { selection[t.id] = true; });
+      renderLibrary();
+    });
+
+    if (sel.length) {
+      btn('Add ' + sel.length + ' →', '', function () {
+        var n = addClips(sel.map(function (t) { return t.id; }));
+        selection = {};
+        renderAll();
+        selectTab('arrange');
+        flash('Added ' + n + ' to the arrangement');
+      });
+      btn('✦ Auto-arrange ' + sel.length, 'auto', function () {
+        var pick = sel.slice();
+        selection = {};
+        autoArrange(pick);
+      });
+    } else {
+      btn('Add all →', '', function () {
+        var pending = loadable.filter(function (t) { return !clipsForTrack(t.id); });
+        if (!pending.length) { flash('Everything is already in the arrangement'); return; }
+        var n = addClips(pending.map(function (t) { return t.id; }));
+        renderAll();
+        selectTab('arrange');
+        flash('Added ' + n + ' to the arrangement');
+      });
+      btn('✦ Auto-arrange all', 'auto', function () { autoArrange(); });
+    }
+    return bar;
+  }
+
   function renderLibrary() {
     el.library.textContent = '';
     if (!tracks.length) {
@@ -1907,11 +2073,9 @@
       el.library.appendChild(e);
       return;
     }
-    tracks.slice().sort(function (a, b) {
-      var ka = a.key ? parseInt(a.key, 10) * 2 + (a.key.slice(-1) === 'B' ? 1 : 0) : 999;
-      var kb = b.key ? parseInt(b.key, 10) * 2 + (b.key.slice(-1) === 'B' ? 1 : 0) : 999;
-      return ka - kb;
-    }).forEach(function (t) { el.library.appendChild(trackRow(t)); });
+    var bar = buildLibBar();
+    if (bar) el.library.appendChild(bar);
+    libSorted().forEach(function (t) { el.library.appendChild(trackRow(t)); });
   }
 
   function renderAll() {
@@ -2137,7 +2301,7 @@
     if (!confirm('Remove all ' + tracks.length + ' tracks and clear the arrangement?')) return;
     stopPlayback(false);
     tracks.forEach(function (t) { delBlob(t.id); });
-    tracks = []; clips = []; blobs = {}; selectedClipId = null;
+    tracks = []; clips = []; blobs = {}; selectedClipId = null; selection = {};
     renderAll(); save();
   });
 

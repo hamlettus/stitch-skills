@@ -148,6 +148,11 @@ function orderTracks(pool) {
     return best || pool.slice();
   }
 
+function clampXfade(xf, introSec) {
+    var room = introSec > 0 ? introSec : 0;
+    return Math.max(4, Math.min(xf, room > 4 ? room : 4));
+  }
+
 function crossfadeFor(a, b) {
     var bpm = (a && a.bpm) || (b && b.bpm) || 124;
     var bar = (60 / bpm) * 4;
@@ -158,4 +163,4 @@ function crossfadeFor(a, b) {
     return Math.max(4, Math.min(48, bar * bars));
   }
 
-module.exports={orderTracks,relation,crossfadeFor,splitMisfits};
+module.exports={orderTracks,relation,crossfadeFor,splitMisfits,clampXfade};

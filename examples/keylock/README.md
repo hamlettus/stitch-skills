@@ -68,6 +68,12 @@ Anything you set by hand is trusted and never overwritten.
 **Library** — add files, get key / BPM / energy / duration per track, sorted
 around the Camelot wheel. Tap a row to correct anything.
 
+**Moving tracks across** — a bar at the top of the Library handles the whole
+crate at once: **Add all →** drops every track on the timeline in key order,
+**✦ Auto-arrange all** works out the running order first. Tick individual tracks
+and both buttons narrow to just those. Anything already on the timeline is
+badged **IN MIX**, and *Add all* skips it.
+
 **Auto-arrange** — one tap orders the whole crate and cuts it cue to cue.
 Ordering balances three things: harmonic compatibility (a clash costs more than
 anything else can earn), tempo proximity (past 6% is outside pitch range), and
@@ -107,6 +113,13 @@ sits at 0.5 + 0.5 amplitude in the middle, which is only half the power — an
 audible ~3 dB dip on every transition. Quarter-sine ramps hold
 `gainA² + gainB² = 1` right through the blend. `test/arrange.test.js` checks
 this: 0.00 dB across the whole crossfade.
+
+**A crossfade never outruns the intro it hides in.** The blend has to be
+finished by the time the incoming track's mix-in cue lands, so the track is at
+full level when its body starts. A 30-second crossfade into a track with a
+24-second intro would leave the meat playing underneath — so the fade is capped
+at the intro length. Short intro, shorter blend. `test/bulk.test.js` checks
+every fade completes exactly on its cue.
 
 **Bouncing is real-time**, via `MediaRecorder` on a `MediaStreamDestination`.
 Rendering offline would mean decoding every track to PCM at once, which is

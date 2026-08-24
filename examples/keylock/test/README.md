@@ -8,6 +8,7 @@ node dsp.test.js        # key + BPM detection
 node structure.test.js  # section segmentation + cue points
 node order.test.js      # set ordering
 node arrange.test.js    # clip placement + crossfade math
+node bulk.test.js       # bulk add: chaining, cue alignment, source bounds
 ```
 
 **dsp** synthesises chord progressions with a known key and tempo and checks
@@ -21,6 +22,11 @@ recovers all six plus sane cue points.
 against a 124–128 set) that should be excluded and named, and one coherent crate
 that should come out clash-free with a proper energy arc. Caught the greedy
 getting stranded from a fixed start.
+
+**bulk** adds three tracks with known cue points in one go and checks each clip
+overlaps the last, stays inside its source, and — the one that caught a real bug
+— that every crossfade finishes by its own mix-in cue. It was running 31 seconds
+into a track with a 24-second intro.
 
 **arrange** places three clips and verifies each overlap matches its crossfade,
 that `gainA² + gainB²` holds at 1 through every blend (equal-power — a linear
