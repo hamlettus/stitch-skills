@@ -47,19 +47,53 @@ Anything you set by hand is trusted and never overwritten.
 
 ## What it does
 
-- **Library** — add files, get key / BPM / energy / duration per track, sorted
-  around the Camelot wheel. Tap a row to correct anything.
-- **Set** — order tracks and read the transition between each pair: `perfect`,
-  `relative`, `+1 energy`, `−1 mood`, `2 steps`, `clash`, plus the BPM delta as
-  a percentage (over 6% is flagged — that's past comfortable pitch range).
-- **Preview** — plays from the same point the analysis sampled.
-- Library and set order persist in `localStorage`.
+**Library** — add files, get key / BPM / energy / duration per track, sorted
+around the Camelot wheel. Tap a row to correct anything.
+
+**Arrange** — the point of the thing. Tracks go on a timeline as clips:
+
+- Drag a clip to move it; drag either edge to trim. Trimming the head keeps the
+  tail in place, so the mix doesn't shift under you.
+- Overlap two clips and you get a crossfade. New clips land crossfaded into
+  whatever currently ends last.
+- Per clip: fade in, fade out, level, and where in the source it starts.
+- Each overlap is labelled with its harmonic verdict — `perfect`, `relative`,
+  `+1 energy`, `−1 mood`, `2 steps`, `clash` — and the BPM gap as a percentage.
+- Tap the ruler to move the playhead; **Cue here** jumps to a clip.
+
+**Bounce** — renders the arrangement to an audio file you can keep.
+
+Library and arrangement persist in `localStorage`; the audio itself lives in
+IndexedDB, so a mix survives a reload.
+
+## Two audio decisions worth knowing
+
+**Playback streams, it doesn't decode.** Clips play through a pool of four
+`<audio>` elements wired into the Web Audio graph via
+`MediaElementAudioSourceNode`. A media element streams from disk instead of
+holding decoded PCM, so an hour-long mix costs almost nothing in memory — the
+same constraint that broke importing would otherwise break playback.
+
+**Crossfades are equal-power, not linear.** Two different tracks are
+uncorrelated, so their *powers* add, not their amplitudes. A linear crossfade
+sits at 0.5 + 0.5 amplitude in the middle, which is only half the power — an
+audible ~3 dB dip on every transition. Quarter-sine ramps hold
+`gainA² + gainB² = 1` right through the blend. `test/arrange.test.js` checks
+this: 0.00 dB across the whole crossfade.
+
+**Bouncing is real-time**, via `MediaRecorder` on a `MediaStreamDestination`.
+Rendering offline would mean decoding every track to PCM at once, which is
+exactly the memory wall that broke importing. So a 40-minute mix takes 40
+minutes to bounce, with the screen open.
 
 ## Known limits
 
-- Audio itself isn't persisted, only the metadata. After a reload, previously
-  analysed tracks are still listed with all their data, but previewing one needs
-  the file re-added. Browsers can't re-open a file without the user picking it.
+- **Bouncing runs in real time** — a 40-minute mix takes 40 minutes, screen on.
+- **Saving from inside the Claude artifact viewer is capped at 16 MB**, which a
+  long mix will exceed. Open `keylock.html` directly in Safari to bounce without
+  that limit. The app says so rather than failing quietly.
+- **No time-stretch.** Clips play at their own tempo; the BPM gap on each
+  transition tells you how far apart they are, but nothing beatmatches yet.
 - Genre is manual. Nothing detects genre reliably from audio.
 - Title and artist are parsed from the filename (`Artist - Title`), not ID3.
 - Analysis reads a 100 s window from 22% in, not the whole track. A track that
@@ -67,6 +101,8 @@ Anything you set by hand is trusted and never overwritten.
 
 ## Not built yet
 
-Arranging and rendering — laying tracks on a timeline, setting overlaps and
-automation, bouncing a finished audio file. That's the other half of the idea
-and it needs this half to be solid first.
+- **Time-stretch / beatmatching.** Needs a rate-shifting playback path;
+  `preservesPitch` on the media elements is the cheap first move.
+- **Bass-swap transitions.** A filter per clip with automation across the
+  overlap, rather than gain alone.
+- **Snapping** clip edges to beat boundaries using the detected BPM.
