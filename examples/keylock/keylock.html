@@ -1,0 +1,1352 @@
+<title>Keylock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground:   #0B0C10;
+    --surface:  #14161D;
+    --surface2: #1C1F29;
+    --line:     #262A36;
+    --line2:    #1B1E28;
+    --text:     #ECEEF3;
+    --muted:    #8B92A6;
+    --faint:    #5A6076;
+
+    --ok:    #4ADE80;
+    --warn:  #FBBF24;
+    --bad:   #F87171;
+    --ok-bg:   rgba(74,222,128,0.12);
+    --warn-bg: rgba(251,191,36,0.12);
+    --bad-bg:  rgba(248,113,113,0.12);
+
+    --display: 'Bricolage Grotesque', Georgia, serif;
+    --ui: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --bar-h: 68px;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--ui);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+  }
+
+  .app {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 14px calc(var(--bar-h) + 28px);
+  }
+
+  /* ---------- header ---------- */
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 22px 2px 14px;
+  }
+
+  .wordmark {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 26px;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .wordmark span { color: var(--faint); }
+
+  .count {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- tabs ---------- */
+
+  .tabs {
+    display: flex;
+    gap: 2px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    padding: 3px;
+    margin-bottom: 16px;
+  }
+
+  .tab {
+    flex: 1;
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-family: var(--ui);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 9px 4px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .tab[aria-selected="true"] { background: var(--surface2); color: var(--text); }
+  .tab:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+
+  /* ---------- track rows ---------- */
+
+  .rows { display: flex; flex-direction: column; gap: 7px; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 46px 1fr auto;
+    align-items: center;
+    gap: 11px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 11px;
+  }
+
+  .keychip {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 13px;
+    text-align: center;
+    padding: 7px 0;
+    border-radius: 8px;
+    color: #0A0B0E;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .keychip.pending { background: var(--surface2); color: var(--faint); }
+
+  .rowmain { min-width: 0; }
+
+  .title {
+    font-weight: 600;
+    font-size: 14.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sub {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .energy { display: inline-flex; gap: 1.5px; vertical-align: -1px; margin-left: 2px; }
+  .energy i { width: 2.5px; height: 8px; border-radius: 1px; background: var(--line); display: block; }
+  .energy i.on { background: var(--warn); }
+
+  .rowact { display: flex; gap: 5px; }
+
+  .iconbtn {
+    appearance: none;
+    width: 34px; height: 34px;
+    border-radius: 9px;
+    border: 1px solid var(--line);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--ui);
+  }
+  .iconbtn:active { background: var(--line); }
+  .iconbtn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .iconbtn[data-on="1"] { background: var(--text); color: var(--ground); border-color: var(--text); }
+  .iconbtn[disabled] { opacity: 0.3; }
+
+  /* ---------- set view ---------- */
+
+  .link {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 3px 0 3px 20px;
+    position: relative;
+  }
+  .link::before {
+    content: "";
+    position: absolute;
+    left: 22px; top: 0; bottom: 0;
+    width: 1px;
+    background: var(--line);
+  }
+
+  .verdict {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 999px;
+    position: relative;
+    z-index: 1;
+  }
+  .v-perfect  { color: var(--ok);   background: var(--ok-bg); }
+  .v-smooth   { color: var(--ok);   background: var(--ok-bg); }
+  .v-caution  { color: var(--warn); background: var(--warn-bg); }
+  .v-clash    { color: var(--bad);  background: var(--bad-bg); }
+
+  .delta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ordinal {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+    width: 18px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .setrow { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: center; }
+
+  /* ---------- empty / status ---------- */
+
+  .empty {
+    border: 1px dashed var(--line);
+    border-radius: 13px;
+    padding: 34px 24px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 5px; font-weight: 600; }
+  .empty p { margin: 0; font-size: 13.5px; line-height: 1.6; }
+
+  /* ---------- bottom bar ---------- */
+
+  .bar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: rgba(11,12,16,0.92);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--line);
+    padding: 11px 14px calc(11px + env(safe-area-inset-bottom));
+  }
+  .bar-inner { max-width: 720px; margin: 0 auto; display: flex; gap: 9px; align-items: center; }
+
+  .btn {
+    appearance: none;
+    flex: 1;
+    border: 0;
+    border-radius: 11px;
+    background: var(--text);
+    color: var(--ground);
+    font-family: var(--ui);
+    font-weight: 600;
+    font-size: 14.5px;
+    padding: 13px 16px;
+    cursor: pointer;
+  }
+  .btn:active { opacity: 0.85; }
+  .btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .btn[disabled] { opacity: 0.4; }
+
+  .btn.ghost {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    flex: 0 0 auto;
+    padding: 13px 15px;
+  }
+
+  .progress { width: 100%; }
+  .pbar {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 7px;
+  }
+  .pfill { height: 100%; background: var(--text); width: 0%; transition: width 180ms ease; }
+  .ptext {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .ptext span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---------- detail sheet ---------- */
+
+  dialog {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  dialog::backdrop { background: rgba(0,0,0,0.6); }
+
+  .sheet {
+    width: min(520px, calc(100vw - 24px));
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px;
+    color: var(--text);
+  }
+  .sheet h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 19px;
+    margin: 0 0 3px;
+    letter-spacing: -0.01em;
+  }
+  .sheet .fname {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+    word-break: break-all;
+    margin: 0 0 16px;
+  }
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  .field input, .field select {
+    width: 100%;
+    background: var(--ground);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    color: var(--text);
+    font-family: var(--ui);
+    font-size: 15px;
+    padding: 10px 11px;
+  }
+  .field input:focus, .field select:focus { outline: 2px solid var(--text); outline-offset: -1px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sheet-actions { display: flex; gap: 9px; margin-top: 16px; }
+
+  .wave {
+    width: 100%;
+    height: 46px;
+    display: block;
+    margin-bottom: 14px;
+    border-radius: 8px;
+    background: var(--ground);
+  }
+
+  .note {
+    font-size: 12.5px;
+    color: var(--muted);
+    background: var(--surface2);
+    border-radius: 9px;
+    padding: 10px 12px;
+    margin: 0 0 14px;
+    line-height: 1.55;
+  }
+
+  .hidden { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+
+<div class="app">
+  <header>
+    <h1 class="wordmark">Keylock<span>.</span></h1>
+    <div class="count" id="count"></div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-library" aria-selected="true">Library</button>
+    <button class="tab" role="tab" id="tab-set" aria-selected="false">Set</button>
+  </div>
+
+  <div id="view-library">
+    <div class="rows" id="library"></div>
+  </div>
+
+  <div id="view-set" class="hidden">
+    <div id="setlist"></div>
+  </div>
+</div>
+
+<div class="bar">
+  <div class="bar-inner" id="bar-idle">
+    <button class="btn" id="btn-import">Add tracks</button>
+    <button class="btn ghost" id="btn-clear" title="Clear library">Clear</button>
+  </div>
+  <div class="bar-inner hidden" id="bar-busy">
+    <div class="progress">
+      <div class="pbar"><div class="pfill" id="pfill"></div></div>
+      <div class="ptext">
+        <span id="ptext">Analysing…</span>
+        <span id="pcount"></span>
+      </div>
+    </div>
+    <button class="btn ghost" id="btn-cancel">Stop</button>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="audio/*,.mp3,.m4a,.wav,.aiff,.aif,.flac" multiple class="hidden">
+
+<dialog id="detail">
+  <form method="dialog" class="sheet" id="detail-form">
+    <canvas class="wave" id="detail-wave" width="600" height="92"></canvas>
+    <h2 id="d-heading">Track</h2>
+    <p class="fname" id="d-fname"></p>
+
+    <div class="field">
+      <label for="d-title">Title</label>
+      <input id="d-title" type="text" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="d-artist">Artist</label>
+      <input id="d-artist" type="text" autocomplete="off">
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="d-key">Camelot key</label>
+        <select id="d-key"></select>
+      </div>
+      <div class="field">
+        <label for="d-bpm">BPM</label>
+        <input id="d-bpm" type="number" min="40" max="240" step="0.1" inputmode="decimal">
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="d-energy">Energy 1–10</label>
+        <input id="d-energy" type="number" min="1" max="10" step="1" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="d-genre">Genre</label>
+        <input id="d-genre" type="text" autocomplete="off" placeholder="e.g. Melodic techno">
+      </div>
+    </div>
+
+    <p class="note" id="d-note"></p>
+
+    <div class="sheet-actions">
+      <button class="btn" value="save" id="d-save">Save</button>
+      <button class="btn ghost" value="cancel" formnovalidate>Close</button>
+    </div>
+  </form>
+</dialog>
+
+<audio id="player" preload="none"></audio>
+
+<script>
+(function () {
+  "use strict";
+
+  // ============================================================
+  //  Camelot wheel
+  // ============================================================
+
+  // Camelot number for each pitch class (C=0), per ring.
+  var MAJOR_CAMELOT = [8, 3, 10, 5, 12, 7, 2, 9, 4, 11, 6, 1];
+  var MINOR_CAMELOT = [5, 12, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10];
+
+  var PC_NAMES = ['C','D♭','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
+
+  // Musical name for each Camelot code, indexed [number][ring]
+  var CAMELOT_NAME = {};
+  (function buildNames() {
+    for (var pc = 0; pc < 12; pc++) {
+      CAMELOT_NAME[MAJOR_CAMELOT[pc] + 'B'] = PC_NAMES[pc] + ' maj';
+      CAMELOT_NAME[MINOR_CAMELOT[pc] + 'A'] = PC_NAMES[pc] + ' min';
+    }
+  })();
+
+  var ALL_KEYS = (function () {
+    var out = [];
+    for (var n = 1; n <= 12; n++) { out.push(n + 'A'); out.push(n + 'B'); }
+    return out;
+  })();
+
+  function keyColor(code) {
+    if (!code) return '#2A2E3A';
+    var n = parseInt(code, 10);
+    var ring = code.slice(-1);
+    var hue = ((n - 1) * 30 + 150) % 360;
+    return 'hsl(' + hue + ',' + (ring === 'A' ? 58 : 68) + '%,' + (ring === 'A' ? 62 : 68) + '%)';
+  }
+
+  /**
+   * How track B sits against track A harmonically.
+   * Camelot rules: same key, +/-1 on the same ring, or the relative
+   * major/minor (same number, other ring) all mix cleanly.
+   */
+  function relation(a, b) {
+    if (!a || !b) return { label: 'unknown', cls: 'v-caution' };
+    if (a === b) return { label: 'perfect', cls: 'v-perfect' };
+    var na = parseInt(a, 10), ra = a.slice(-1);
+    var nb = parseInt(b, 10), rb = b.slice(-1);
+    if (na === nb && ra !== rb) return { label: 'relative', cls: 'v-smooth' };
+    if (ra === rb) {
+      var up = (na % 12) + 1;
+      var down = na === 1 ? 12 : na - 1;
+      if (nb === up) return { label: '+1 energy', cls: 'v-smooth' };
+      if (nb === down) return { label: '−1 mood', cls: 'v-smooth' };
+      var dist = Math.min((nb - na + 12) % 12, (na - nb + 12) % 12);
+      if (dist === 2) return { label: '2 steps', cls: 'v-caution' };
+    }
+    return { label: 'clash', cls: 'v-clash' };
+  }
+
+  // ============================================================
+  //  Analysis
+  //
+  //  The whole memory story lives here. decodeAudioData decodes an
+  //  ENTIRE file to float32 before it resolves — a 6 min stereo track
+  //  at 44.1kHz is ~127MB, which is what kills the tab on iOS.
+  //  Decoding into a low-rate OfflineAudioContext makes the decoder
+  //  resample on the way out, so the same track lands at ~16MB.
+  //  Nothing above ~5kHz matters for chroma or beat detection.
+  // ============================================================
+
+  var RATE = 11025;
+  var WINDOW_SEC = 100;   // analysed slice
+  var SKIP_FRAC = 0.22;   // start this far in, past intros
+
+  function makeDecodeCtx() {
+    var C = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!C) return null;
+    try {
+      return new C(1, 1, RATE);
+    } catch (e) {
+      try { return new C(1, 1, 44100); } catch (e2) { return null; }
+    }
+  }
+
+  function decodeAudio(ctx, arrayBuffer) {
+    return new Promise(function (resolve, reject) {
+      // Safari still wants the callback form in some versions.
+      var p;
+      try {
+        p = ctx.decodeAudioData(arrayBuffer, resolve, reject);
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      if (p && typeof p.then === 'function') p.then(resolve, reject);
+    });
+  }
+
+  /** Mono mixdown of just the analysis window, so the big buffer can go. */
+  function extractWindow(buf) {
+    var sr = buf.sampleRate;
+    var total = buf.length;
+    var want = Math.min(Math.floor(WINDOW_SEC * sr), total);
+    var start = Math.floor(total * SKIP_FRAC);
+    if (start + want > total) start = Math.max(0, total - want);
+
+    var out = new Float32Array(want);
+    var chans = Math.min(buf.numberOfChannels, 2);
+    for (var c = 0; c < chans; c++) {
+      var data = buf.getChannelData(c);
+      for (var i = 0; i < want; i++) out[i] += data[start + i];
+    }
+    if (chans > 1) {
+      for (var j = 0; j < want; j++) out[j] /= chans;
+    }
+    return { samples: out, sampleRate: sr, durationSec: total / sr };
+  }
+
+  // ---- FFT (iterative radix-2) ----
+
+  function fft(re, im) {
+    var n = re.length, i, j, bit, len, ang, wr, wi, k, tr, ti;
+    for (i = 1, j = 0; i < n; i++) {
+      bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        tr = re[i]; re[i] = re[j]; re[j] = tr;
+        ti = im[i]; im[i] = im[j]; im[j] = ti;
+      }
+    }
+    for (len = 2; len <= n; len <<= 1) {
+      ang = -2 * Math.PI / len;
+      wr = Math.cos(ang); wi = Math.sin(ang);
+      for (i = 0; i < n; i += len) {
+        var cr = 1, ci = 0;
+        for (k = 0; k < len >> 1; k++) {
+          var ar = re[i + k], ai = im[i + k];
+          var br = re[i + k + (len >> 1)], bi = im[i + k + (len >> 1)];
+          var vr = br * cr - bi * ci;
+          var vi = br * ci + bi * cr;
+          re[i + k] = ar + vr; im[i + k] = ai + vi;
+          re[i + k + (len >> 1)] = ar - vr; im[i + k + (len >> 1)] = ai - vi;
+          var ncr = cr * wr - ci * wi;
+          ci = cr * wi + ci * wr;
+          cr = ncr;
+        }
+      }
+    }
+  }
+
+  var FFT_N = 4096;
+  var HANN = (function () {
+    var w = new Float32Array(FFT_N);
+    for (var i = 0; i < FFT_N; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (FFT_N - 1));
+    return w;
+  })();
+
+  // Albrecht & Shanahan profiles — derived from a large corpus and much better
+  // at telling major from its relative minor than Krumhansl–Kessler.
+  var PROF_MAJ = [0.238,0.006,0.111,0.006,0.137,0.094,0.016,0.214,0.009,0.080,0.008,0.081];
+  var PROF_MIN = [0.220,0.006,0.104,0.123,0.019,0.103,0.012,0.214,0.062,0.022,0.061,0.052];
+
+  // A key and its relative share every note, so the profile match alone can't
+  // separate them. The bass almost always states the real tonic, so a root
+  // term breaks the tie.
+  var BASS_WEIGHT = 0.55;
+
+  function correlate(a, b) {
+    var n = a.length, ma = 0, mb = 0, i;
+    for (i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+    ma /= n; mb /= n;
+    var num = 0, da = 0, db = 0;
+    for (i = 0; i < n; i++) {
+      var x = a[i] - ma, y = b[i] - mb;
+      num += x * y; da += x * x; db += y * y;
+    }
+    if (da === 0 || db === 0) return 0;
+    return num / Math.sqrt(da * db);
+  }
+
+  function yieldUI() {
+    return new Promise(function (r) { setTimeout(r, 0); });
+  }
+
+  /** Chroma vector + Camelot key. */
+  async function detectKey(samples, sr) {
+    var chroma = new Float64Array(12);
+    var bass = new Float64Array(12);
+    var hop = FFT_N;                      // no overlap: plenty of frames already
+    var frames = Math.floor((samples.length - FFT_N) / hop);
+    if (frames < 1) return null;
+
+    var re = new Float64Array(FFT_N);
+    var im = new Float64Array(FFT_N);
+
+    // Precompute bin -> pitch class. binOk marks the harmonic band used for the
+    // profile match; binBass marks the low band used to find the root.
+    var binPc = new Int8Array(FFT_N / 2);
+    var binOk = new Uint8Array(FFT_N / 2);
+    var binBass = new Uint8Array(FFT_N / 2);
+    for (var b = 1; b < FFT_N / 2; b++) {
+      var freq = b * sr / FFT_N;
+      if (freq < 40 || freq > 2000) { binOk[b] = 0; binBass[b] = 0; continue; }
+      var midi = 69 + 12 * Math.log2(freq / 440);
+      binPc[b] = ((Math.round(midi) % 12) + 12) % 12;
+      binOk[b] = freq >= 65 ? 1 : 0;
+      binBass[b] = freq <= 260 ? 1 : 0;
+    }
+
+    for (var f = 0; f < frames; f++) {
+      var off = f * hop;
+      for (var i = 0; i < FFT_N; i++) { re[i] = samples[off + i] * HANN[i]; im[i] = 0; }
+      fft(re, im);
+      for (var k = 1; k < FFT_N / 2; k++) {
+        if (!binOk[k] && !binBass[k]) continue;
+        var mag = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+        if (binOk[k]) chroma[binPc[k]] += mag;
+        if (binBass[k]) bass[binPc[k]] += mag;
+      }
+      if ((f & 7) === 0) await yieldUI();
+    }
+
+    var sum = 0, bsum = 0, c;
+    for (c = 0; c < 12; c++) { sum += chroma[c]; bsum += bass[c]; }
+    if (sum <= 0) return null;
+    for (c = 0; c < 12; c++) {
+      chroma[c] /= sum;
+      bass[c] = bsum > 0 ? bass[c] / bsum : 0;
+    }
+
+    var scored = [];
+    for (var tonic = 0; tonic < 12; tonic++) {
+      var rot = new Float64Array(12);
+      for (var d = 0; d < 12; d++) rot[d] = chroma[(tonic + d) % 12];
+      // The root term rewards a tonic the bass actually plays.
+      var root = bass[tonic] * BASS_WEIGHT;
+      scored.push({ corr: correlate(rot, PROF_MAJ), score: correlate(rot, PROF_MAJ) + root, pc: tonic, minor: false });
+      scored.push({ corr: correlate(rot, PROF_MIN), score: correlate(rot, PROF_MIN) + root, pc: tonic, minor: true });
+    }
+    scored.sort(function (x, y) { return y.score - x.score; });
+
+    var best = scored[0];
+    var runner = scored[1];
+    var num = best.minor ? MINOR_CAMELOT[best.pc] : MAJOR_CAMELOT[best.pc];
+    var altNum = runner.minor ? MINOR_CAMELOT[runner.pc] : MAJOR_CAMELOT[runner.pc];
+    var alt = altNum + (runner.minor ? 'A' : 'B');
+
+    // A close second that is the relative key means the call is a coin-flip.
+    var margin = best.score - runner.score;
+    var relativeTie = (num === altNum) && margin < 0.08;
+
+    return {
+      code: num + (best.minor ? 'A' : 'B'),
+      alt: alt,
+      relativeTie: relativeTie,
+      confidence: Math.max(0, Math.min(1, best.corr))
+    };
+  }
+
+  /** Onset-envelope autocorrelation. */
+  async function detectBpm(samples, sr) {
+    var hop = 256;
+    var frames = Math.floor(samples.length / hop);
+    if (frames < 64) return null;
+
+    // RMS envelope
+    var env = new Float32Array(frames);
+    for (var f = 0; f < frames; f++) {
+      var s = 0, off = f * hop;
+      for (var i = 0; i < hop; i++) { var v = samples[off + i]; s += v * v; }
+      env[f] = Math.sqrt(s / hop);
+      if ((f & 1023) === 0) await yieldUI();
+    }
+
+    // Half-wave rectified difference = onset strength
+    var odf = new Float32Array(frames);
+    for (var g = 1; g < frames; g++) {
+      var d = env[g] - env[g - 1];
+      odf[g] = d > 0 ? d : 0;
+    }
+
+    // Remove DC so autocorrelation isn't dominated by the mean
+    var mean = 0, j;
+    for (j = 0; j < frames; j++) mean += odf[j];
+    mean /= frames;
+    for (j = 0; j < frames; j++) odf[j] -= mean;
+
+    var fps = sr / hop;
+    var minLag = Math.floor(fps * 60 / 200);
+    var maxLag = Math.ceil(fps * 60 / 60);
+    if (maxLag >= frames) maxLag = frames - 1;
+    if (minLag < 2 || maxLag <= minLag) return null;
+
+    var bestLag = -1, bestVal = -Infinity;
+    for (var lag = minLag; lag <= maxLag; lag++) {
+      var acc = 0;
+      for (var n = 0; n + lag < frames; n++) acc += odf[n] * odf[n + lag];
+      acc /= (frames - lag);
+      if (acc > bestVal) { bestVal = acc; bestLag = lag; }
+      if ((lag & 63) === 0) await yieldUI();
+    }
+    if (bestLag < 0) return null;
+
+    var bpm = 60 * fps / bestLag;
+    // Fold into the range DJs actually read
+    while (bpm < 70) bpm *= 2;
+    while (bpm > 180) bpm /= 2;
+    return Math.round(bpm * 10) / 10;
+  }
+
+  /** Loudness + brightness folded into a 1..10 feel. */
+  function detectEnergy(samples) {
+    var n = samples.length, s = 0, peak = 0, i;
+    for (i = 0; i < n; i++) {
+      var v = samples[i];
+      s += v * v;
+      var a = v < 0 ? -v : v;
+      if (a > peak) peak = a;
+    }
+    var rms = Math.sqrt(s / n);
+    if (rms <= 0) return 1;
+    var db = 20 * Math.log10(rms);
+    // -30dB -> 1, -8dB -> 10
+    var e = Math.round(1 + (db + 30) * (9 / 22));
+    return Math.max(1, Math.min(10, e));
+  }
+
+  function peaksFor(samples, buckets) {
+    var out = new Float32Array(buckets);
+    var per = Math.floor(samples.length / buckets);
+    if (per < 1) return out;
+    for (var b = 0; b < buckets; b++) {
+      var m = 0, off = b * per;
+      for (var i = 0; i < per; i += 3) {
+        var a = samples[off + i];
+        if (a < 0) a = -a;
+        if (a > m) m = a;
+      }
+      out[b] = m;
+    }
+    return out;
+  }
+
+  function parseName(filename) {
+    var base = filename.replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim();
+    // Strip a leading track number: "03 " or "03. " or "03 - "
+    base = base.replace(/^\d{1,3}\s*[-.]?\s+/, '');
+    var parts = base.split(/\s+-\s+/);
+    if (parts.length >= 2) {
+      return { artist: parts[0].trim(), title: parts.slice(1).join(' - ').trim() };
+    }
+    return { artist: '', title: base };
+  }
+
+  // ============================================================
+  //  State + storage
+  // ============================================================
+
+  var tracks = [];        // metadata, persisted
+  var blobs = {};         // id -> File, session only
+  var setIds = [];        // ordered track ids
+  var cancelFlag = false;
+
+  var STORE_KEY = 'keylock.library.v1';
+  var SET_KEY = 'keylock.set.v1';
+
+  function save() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(tracks.map(function (t) {
+        return {
+          id: t.id, title: t.title, artist: t.artist, genre: t.genre,
+          key: t.key, keyAlt: t.keyAlt, confidence: t.confidence, bpm: t.bpm, energy: t.energy,
+          filename: t.filename, durationSec: t.durationSec,
+          peaks: t.peaks ? Array.from(t.peaks).map(function (p) { return Math.round(p * 255); }) : null
+        };
+      })));
+      localStorage.setItem(SET_KEY, JSON.stringify(setIds));
+    } catch (e) { /* quota or private mode — library still works in memory */ }
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          tracks = parsed.map(function (t) {
+            if (t.peaks) t.peaks = Float32Array.from(t.peaks, function (p) { return p / 255; });
+            return t;
+          });
+        }
+      }
+      var rawSet = localStorage.getItem(SET_KEY);
+      if (rawSet) {
+        var ids = JSON.parse(rawSet);
+        if (Array.isArray(ids)) setIds = ids;
+      }
+    } catch (e) { tracks = []; setIds = []; }
+  }
+
+  // ============================================================
+  //  Import pipeline
+  // ============================================================
+
+  var el = {
+    library: document.getElementById('library'),
+    setlist: document.getElementById('setlist'),
+    count: document.getElementById('count'),
+    barIdle: document.getElementById('bar-idle'),
+    barBusy: document.getElementById('bar-busy'),
+    pfill: document.getElementById('pfill'),
+    ptext: document.getElementById('ptext'),
+    pcount: document.getElementById('pcount'),
+    input: document.getElementById('file-input'),
+    viewLib: document.getElementById('view-library'),
+    viewSet: document.getElementById('view-set'),
+    tabLib: document.getElementById('tab-library'),
+    tabSet: document.getElementById('tab-set'),
+    player: document.getElementById('player'),
+    detail: document.getElementById('detail')
+  };
+
+  async function importFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList).filter(function (f) {
+      return !tracks.some(function (t) { return t.filename === f.name && t.sizeBytes === f.size; });
+    });
+
+    if (!files.length) {
+      flash('Those tracks are already in the library');
+      return;
+    }
+
+    cancelFlag = false;
+    el.barIdle.classList.add('hidden');
+    el.barBusy.classList.remove('hidden');
+
+    var done = 0;
+    for (var i = 0; i < files.length; i++) {
+      if (cancelFlag) break;
+      var file = files[i];
+
+      el.ptext.textContent = file.name;
+      el.pcount.textContent = (done + 1) + ' / ' + files.length;
+      el.pfill.style.width = ((done / files.length) * 100).toFixed(1) + '%';
+      await yieldUI();
+
+      try {
+        await analyseOne(file);
+      } catch (err) {
+        var nm = parseName(file.name);
+        tracks.push({
+          id: 'k' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+          title: nm.title, artist: nm.artist, genre: '',
+          key: null, confidence: 0, bpm: null, energy: null,
+          filename: file.name, sizeBytes: file.size, durationSec: null,
+          peaks: null, error: String(err && err.message ? err.message : err)
+        });
+      }
+
+      done++;
+      render();
+      save();
+
+      // Let Safari's collector actually run before the next decode.
+      await new Promise(function (r) { setTimeout(r, 140); });
+    }
+
+    el.pfill.style.width = '100%';
+    el.barBusy.classList.add('hidden');
+    el.barIdle.classList.remove('hidden');
+    el.input.value = '';
+    render();
+    save();
+  }
+
+  async function analyseOne(file) {
+    var ctx = makeDecodeCtx();
+    if (!ctx) throw new Error('Web Audio unavailable');
+
+    var arr = await file.arrayBuffer();
+    var buf = await decodeAudio(ctx, arr);
+    arr = null;
+
+    var win = extractWindow(buf);
+    buf = null;                 // drop the big one before analysis starts
+
+    await yieldUI();
+
+    var samples = win.samples;
+    var sr = win.sampleRate;
+
+    var key = await detectKey(samples, sr);
+    var bpm = await detectBpm(samples, sr);
+    var energy = detectEnergy(samples);
+    var peaks = peaksFor(samples, 160);
+
+    var nm = parseName(file.name);
+    var id = 'k' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+
+    blobs[id] = file;
+    tracks.push({
+      id: id,
+      title: nm.title,
+      artist: nm.artist,
+      genre: '',
+      key: key ? key.code : null,
+      keyAlt: key && key.relativeTie ? key.alt : null,
+      confidence: key ? key.confidence : 0,
+      bpm: bpm,
+      energy: energy,
+      filename: file.name,
+      sizeBytes: file.size,
+      durationSec: win.durationSec,
+      peaks: peaks,
+      error: null
+    });
+  }
+
+  // ============================================================
+  //  Rendering
+  // ============================================================
+
+  function fmtDur(sec) {
+    if (!sec && sec !== 0) return '--:--';
+    var s = Math.round(sec);
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function energyBars(n) {
+    var wrap = document.createElement('span');
+    wrap.className = 'energy';
+    for (var i = 1; i <= 10; i++) {
+      var b = document.createElement('i');
+      if (n && i <= n) b.className = 'on';
+      wrap.appendChild(b);
+    }
+    return wrap;
+  }
+
+  function trackRow(t, opts) {
+    opts = opts || {};
+    var row = document.createElement('div');
+    row.className = 'row';
+
+    var chip = document.createElement('div');
+    chip.className = 'keychip' + (t.key ? '' : ' pending');
+    if (t.key) chip.style.background = keyColor(t.key);
+    chip.textContent = (t.key || '--') + (t.keyAlt ? '?' : '');
+    chip.title = t.key
+      ? CAMELOT_NAME[t.key] + (t.keyAlt ? '  — could also be ' + t.keyAlt + ' (' + CAMELOT_NAME[t.keyAlt] + ')' : '')
+      : 'Key not detected';
+    row.appendChild(chip);
+
+    var main = document.createElement('div');
+    main.className = 'rowmain';
+
+    var title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = t.title || t.filename;
+    main.appendChild(title);
+
+    var sub = document.createElement('div');
+    sub.className = 'sub';
+    var bits = [];
+    if (t.artist) bits.push(t.artist);
+    if (t.bpm) bits.push(t.bpm.toFixed(1) + ' BPM');
+    if (t.key) bits.push(CAMELOT_NAME[t.key]);
+    bits.push(fmtDur(t.durationSec));
+    if (t.genre) bits.push(t.genre);
+    sub.textContent = bits.join('  ·  ');
+    if (t.energy) {
+      sub.appendChild(document.createTextNode('  '));
+      sub.appendChild(energyBars(t.energy));
+    }
+    main.appendChild(sub);
+
+    if (t.error) {
+      var er = document.createElement('div');
+      er.className = 'sub';
+      er.style.color = 'var(--bad)';
+      er.textContent = 'Could not analyse: ' + t.error;
+      main.appendChild(er);
+    }
+
+    main.style.cursor = 'pointer';
+    main.addEventListener('click', function () { openDetail(t.id); });
+    row.appendChild(main);
+
+    var act = document.createElement('div');
+    act.className = 'rowact';
+
+    var play = document.createElement('button');
+    play.className = 'iconbtn';
+    play.type = 'button';
+    play.textContent = '▶';
+    play.setAttribute('aria-label', 'Preview ' + (t.title || t.filename));
+    if (!blobs[t.id]) { play.disabled = true; play.title = 'Re-add this file to preview it'; }
+    play.addEventListener('click', function (e) { e.stopPropagation(); preview(t.id, play); });
+    act.appendChild(play);
+
+    if (opts.inSet) {
+      var rm = document.createElement('button');
+      rm.className = 'iconbtn';
+      rm.type = 'button';
+      rm.textContent = '✕';
+      rm.setAttribute('aria-label', 'Remove from set');
+      rm.addEventListener('click', function (e) {
+        e.stopPropagation();
+        setIds = setIds.filter(function (x) { return x !== t.id; });
+        render(); save();
+      });
+      act.appendChild(rm);
+    } else {
+      var add = document.createElement('button');
+      add.className = 'iconbtn';
+      add.type = 'button';
+      var on = setIds.indexOf(t.id) !== -1;
+      add.textContent = on ? '✓' : '+';
+      if (on) add.dataset.on = '1';
+      add.setAttribute('aria-label', on ? 'In set' : 'Add to set');
+      add.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (setIds.indexOf(t.id) === -1) setIds.push(t.id);
+        else setIds = setIds.filter(function (x) { return x !== t.id; });
+        render(); save();
+      });
+      act.appendChild(add);
+    }
+
+    row.appendChild(act);
+    return row;
+  }
+
+  function render() {
+    // ---- Library ----
+    el.library.textContent = '';
+    if (!tracks.length) {
+      var e = document.createElement('div');
+      e.className = 'empty';
+      e.innerHTML = '<b>No tracks yet</b><p>Add audio files from your phone and Keylock reads the key, tempo and energy off each one.</p>';
+      el.library.appendChild(e);
+    } else {
+      var sorted = tracks.slice().sort(function (a, b) {
+        var ka = a.key ? parseInt(a.key, 10) * 2 + (a.key.slice(-1) === 'B' ? 1 : 0) : 999;
+        var kb = b.key ? parseInt(b.key, 10) * 2 + (b.key.slice(-1) === 'B' ? 1 : 0) : 999;
+        return ka - kb;
+      });
+      sorted.forEach(function (t) { el.library.appendChild(trackRow(t)); });
+    }
+
+    // ---- Set ----
+    el.setlist.textContent = '';
+    var inSet = setIds.map(function (id) {
+      return tracks.filter(function (t) { return t.id === id; })[0];
+    }).filter(Boolean);
+
+    if (!inSet.length) {
+      var e2 = document.createElement('div');
+      e2.className = 'empty';
+      e2.innerHTML = '<b>Set is empty</b><p>Tap + on a track in the Library to build an order. Keylock scores every transition as you go.</p>';
+      el.setlist.appendChild(e2);
+    } else {
+      inSet.forEach(function (t, i) {
+        if (i > 0) {
+          var prev = inSet[i - 1];
+          var rel = relation(prev.key, t.key);
+          var link = document.createElement('div');
+          link.className = 'link';
+          var v = document.createElement('span');
+          v.className = 'verdict ' + rel.cls;
+          v.textContent = rel.label;
+          link.appendChild(v);
+          if (prev.bpm && t.bpm) {
+            var d = document.createElement('span');
+            d.className = 'delta';
+            var diff = t.bpm - prev.bpm;
+            var pct = (diff / prev.bpm) * 100;
+            d.textContent = (diff >= 0 ? '+' : '−') + Math.abs(diff).toFixed(1) +
+              ' BPM (' + (pct >= 0 ? '+' : '−') + Math.abs(pct).toFixed(1) + '%)';
+            if (Math.abs(pct) > 6) d.style.color = 'var(--warn)';
+            link.appendChild(d);
+          }
+          el.setlist.appendChild(link);
+        }
+        var wrap = document.createElement('div');
+        wrap.className = 'setrow';
+        var ord = document.createElement('div');
+        ord.className = 'ordinal';
+        ord.textContent = String(i + 1);
+        wrap.appendChild(ord);
+        wrap.appendChild(trackRow(t, { inSet: true }));
+        el.setlist.appendChild(wrap);
+      });
+    }
+
+    // ---- Count ----
+    var analysed = tracks.filter(function (t) { return t.key; }).length;
+    el.count.textContent = tracks.length
+      ? analysed + ' of ' + tracks.length + ' keyed · ' + setIds.length + ' in set'
+      : '';
+  }
+
+  // ============================================================
+  //  Preview playback
+  // ============================================================
+
+  var playingId = null, playingBtn = null;
+
+  function preview(id, btn) {
+    var f = blobs[id];
+    if (!f) return;
+
+    if (playingId === id) {
+      el.player.pause();
+      resetPlayBtn();
+      return;
+    }
+    resetPlayBtn();
+
+    try {
+      if (el.player.src) URL.revokeObjectURL(el.player.src);
+      el.player.src = URL.createObjectURL(f);
+      var t = tracks.filter(function (x) { return x.id === id; })[0];
+      if (t && t.durationSec) el.player.currentTime = t.durationSec * SKIP_FRAC;
+      el.player.play();
+      playingId = id;
+      playingBtn = btn;
+      btn.textContent = '■';
+      btn.dataset.on = '1';
+    } catch (e) { /* ignore */ }
+  }
+
+  function resetPlayBtn() {
+    if (playingBtn) {
+      playingBtn.textContent = '▶';
+      delete playingBtn.dataset.on;
+    }
+    playingId = null;
+    playingBtn = null;
+  }
+
+  el.player.addEventListener('ended', resetPlayBtn);
+  el.player.addEventListener('pause', resetPlayBtn);
+  el.player.addEventListener('loadedmetadata', function () {
+    var t = tracks.filter(function (x) { return x.id === playingId; })[0];
+    if (t && t.durationSec) {
+      try { el.player.currentTime = t.durationSec * SKIP_FRAC; } catch (e) {}
+    }
+  });
+
+  // ============================================================
+  //  Detail sheet
+  // ============================================================
+
+  var editingId = null;
+
+  (function fillKeySelect() {
+    var sel = document.getElementById('d-key');
+    var none = document.createElement('option');
+    none.value = '';
+    none.textContent = '— not set —';
+    sel.appendChild(none);
+    ALL_KEYS.forEach(function (k) {
+      var o = document.createElement('option');
+      o.value = k;
+      o.textContent = k + '  ·  ' + CAMELOT_NAME[k];
+      sel.appendChild(o);
+    });
+  })();
+
+  function openDetail(id) {
+    var t = tracks.filter(function (x) { return x.id === id; })[0];
+    if (!t) return;
+    editingId = id;
+
+    document.getElementById('d-heading').textContent = t.title || t.filename;
+    document.getElementById('d-fname').textContent = t.filename;
+    document.getElementById('d-title').value = t.title || '';
+    document.getElementById('d-artist').value = t.artist || '';
+    document.getElementById('d-key').value = t.key || '';
+    document.getElementById('d-bpm').value = t.bpm != null ? t.bpm : '';
+    document.getElementById('d-energy').value = t.energy != null ? t.energy : '';
+    document.getElementById('d-genre').value = t.genre || '';
+
+    var note = document.getElementById('d-note');
+    if (t.key && t.keyAlt) {
+      note.textContent = 'Close call between ' + t.key + ' (' + CAMELOT_NAME[t.key] + ') and ' +
+        t.keyAlt + ' (' + CAMELOT_NAME[t.keyAlt] + '). These are relative keys — identical notes, ' +
+        'so only the bass line separates them. Worth a listen: pick the one the track resolves to.';
+    } else if (t.key) {
+      var pct = Math.round(t.confidence * 100);
+      note.textContent = 'Detected ' + t.key + ' (' + CAMELOT_NAME[t.key] + ') at ' + pct +
+        '% profile match. Under about 55% is worth checking by ear — anything you set by hand is kept.';
+    } else {
+      note.textContent = 'No key detected. Set it by hand and the set builder will use it.';
+    }
+
+    drawWave(t);
+    el.detail.showModal();
+  }
+
+  function drawWave(t) {
+    var cv = document.getElementById('detail-wave');
+    var g = cv.getContext('2d');
+    var w = cv.width, h = cv.height;
+    g.clearRect(0, 0, w, h);
+    if (!t.peaks || !t.peaks.length) return;
+    var n = t.peaks.length;
+    var bw = w / n;
+    g.fillStyle = t.key ? keyColor(t.key) : '#3A4050';
+    for (var i = 0; i < n; i++) {
+      var mag = Math.pow(t.peaks[i], 0.7);
+      var bh = Math.max(2, mag * h * 0.92);
+      g.fillRect(i * bw, (h - bh) / 2, Math.max(1, bw - 1), bh);
+    }
+  }
+
+  document.getElementById('detail-form').addEventListener('submit', function (ev) {
+    if (ev.submitter && ev.submitter.value !== 'save') return;
+    var t = tracks.filter(function (x) { return x.id === editingId; })[0];
+    if (!t) return;
+    t.title = document.getElementById('d-title').value.trim() || t.filename;
+    t.artist = document.getElementById('d-artist').value.trim();
+    t.key = document.getElementById('d-key').value || null;
+    var bpmVal = parseFloat(document.getElementById('d-bpm').value);
+    t.bpm = isFinite(bpmVal) ? bpmVal : null;
+    var enVal = parseInt(document.getElementById('d-energy').value, 10);
+    t.energy = isFinite(enVal) ? Math.max(1, Math.min(10, enVal)) : null;
+    t.genre = document.getElementById('d-genre').value.trim();
+    if (t.key) { t.confidence = 1; t.keyAlt = null; }   // hand-set = trusted
+    render();
+    save();
+  });
+
+  // ============================================================
+  //  Wiring
+  // ============================================================
+
+  function flash(msg) {
+    el.ptext.textContent = msg;
+    el.pcount.textContent = '';
+    el.barIdle.classList.add('hidden');
+    el.barBusy.classList.remove('hidden');
+    el.pfill.style.width = '100%';
+    setTimeout(function () {
+      el.barBusy.classList.add('hidden');
+      el.barIdle.classList.remove('hidden');
+      el.pfill.style.width = '0%';
+    }, 1600);
+  }
+
+  document.getElementById('btn-import').addEventListener('click', function () {
+    el.input.click();
+  });
+
+  el.input.addEventListener('change', function () {
+    if (el.input.files && el.input.files.length) importFiles(el.input.files);
+  });
+
+  document.getElementById('btn-cancel').addEventListener('click', function () {
+    cancelFlag = true;
+  });
+
+  document.getElementById('btn-clear').addEventListener('click', function () {
+    if (!tracks.length) return;
+    if (!confirm('Remove all ' + tracks.length + ' tracks from the library?')) return;
+    tracks = [];
+    setIds = [];
+    blobs = {};
+    render();
+    save();
+  });
+
+  function selectTab(which) {
+    var lib = which === 'library';
+    el.tabLib.setAttribute('aria-selected', lib ? 'true' : 'false');
+    el.tabSet.setAttribute('aria-selected', lib ? 'false' : 'true');
+    el.viewLib.classList.toggle('hidden', !lib);
+    el.viewSet.classList.toggle('hidden', lib);
+  }
+  el.tabLib.addEventListener('click', function () { selectTab('library'); });
+  el.tabSet.addEventListener('click', function () { selectTab('set'); });
+
+  load();
+  render();
+})();
+</script>
