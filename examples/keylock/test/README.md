@@ -1,18 +1,28 @@
 # Checks
 
-Both files are lifted out of `keylock.html` so they can run in Node. If you
-change the app, re-copy them.
+Each `*.js` here is lifted verbatim out of `keylock.html` so it can run in Node.
+If you change the app, re-extract them.
 
 ```bash
-node examples/keylock/test/dsp.test.js       # key + BPM detection
-node examples/keylock/test/arrange.test.js   # clip placement + crossfade math
+node dsp.test.js        # key + BPM detection
+node structure.test.js  # section segmentation + cue points
+node order.test.js      # set ordering
+node arrange.test.js    # clip placement + crossfade math
 ```
 
-`dsp.test.js` synthesises chord progressions with a known key and tempo —
-additive tones with five harmonics, a bass root an octave down, a kick on each
-beat — then checks what the detectors report.
+**dsp** synthesises chord progressions with a known key and tempo and checks
+what comes back. Caught the relative-key bug: A minor read as C major.
 
-`arrange.test.js` places three clips, then verifies each overlap matches its
-crossfade length, that `gainA² + gainB²` stays at 1 through every blend (the
-equal-power property — a linear fade would dip 3 dB), that the envelope is right
-at both edges, and that total length accounts for the overlaps.
+**structure** builds a track with an arrangement we specify exactly — bass-less
+intro, groove, drop, breakdown, second drop, outro — and checks the detector
+recovers all six plus sane cue points.
+
+**order** runs two crates: one with a deliberate outlier (wrong key, 145 BPM
+against a 124–128 set) that should be excluded and named, and one coherent crate
+that should come out clash-free with a proper energy arc. Caught the greedy
+getting stranded from a fixed start.
+
+**arrange** places three clips and verifies each overlap matches its crossfade,
+that `gainA² + gainB²` holds at 1 through every blend (equal-power — a linear
+fade dips 3 dB), that the envelope is right at both edges, and that total length
+accounts for the overlaps.

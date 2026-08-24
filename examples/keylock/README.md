@@ -29,9 +29,27 @@ window is kept, and there is a short pause between files so the collector runs.
 | **BPM** | RMS onset envelope → half-wave rectified difference → autocorrelation over 60–200 BPM, folded to a readable octave | 126 → 126.0, 174 → 172.3, 124 → 123.0, 140 → 139.7 |
 | **Key** | Constant-window FFT → 12-bin chroma → correlation against Albrecht–Shanahan profiles for all 24 keys, plus a bass-root term | 5/5 on synthetic progressions |
 | **Energy** | RMS in dB mapped to 1–10 | — |
+| **Structure** | Low band (<180 Hz) tracked separately from overall loudness; state changes segment the track into intro / groove / drop / breakdown / outro | 6/6 sections on a synthetic arrangement |
+| **Cue points** | Mix-in, mix-out, drop and breakdown derived from the sections, snapped to the bar via onset-aligned beat phase | all within tolerance |
 | **Genre** | Not detected — type it in | — |
 
 Run the checks with `node test/dsp.test.js`.
+
+### Why the bass, not the energy
+
+Overall loudness mostly drifts — it does not tell you where a track changes.
+The bass does: it drops out for a breakdown and slams back for the drop. So
+structure detection low-passes at 180 Hz and tracks that band separately, then
+segments where the bass-present / energy-band state changes and holds. On a
+synthetic track with a known arrangement it recovers all six sections with
+boundaries inside a second or two.
+
+Cue points fall out of the sections. **Mix in** is the first point with bass and
+real energy — everything before it is intro, which is exactly what you play
+under the outgoing track. **Mix out** is the start of the outro, or 32 beats
+from the end if the track just stops. Both are snapped to the bar using a beat
+phase estimated from onset alignment, so a cue lands on a downbeat rather than
+mid-bar.
 
 ### The relative-key problem
 
@@ -50,7 +68,16 @@ Anything you set by hand is trusted and never overwritten.
 **Library** — add files, get key / BPM / energy / duration per track, sorted
 around the Camelot wheel. Tap a row to correct anything.
 
-**Arrange** — the point of the thing. Tracks go on a timeline as clips:
+**Auto-arrange** — one tap orders the whole crate and cuts it cue to cue.
+Ordering balances three things: harmonic compatibility (a clash costs more than
+anything else can earn), tempo proximity (past 6% is outside pitch range), and
+an energy arc that climbs to a peak about two-thirds through and comes down.
+Greedy chaining runs from every plausible start — anchored to one track it
+strands keys with nowhere clean to go — then a 2-opt pass refines it. Tracks
+that can only be reached through *both* a key clash and a tempo jump past pitch
+range are left out and named, rather than buried mid-mix.
+
+**Arrange** — tracks go on a timeline as clips:
 
 - Drag a clip to move it; drag either edge to trim. Trimming the head keeps the
   tail in place, so the mix doesn't shift under you.
@@ -94,6 +121,9 @@ minutes to bounce, with the screen open.
   that limit. The app says so rather than failing quietly.
 - **No time-stretch.** Clips play at their own tempo; the BPM gap on each
   transition tells you how far apart they are, but nothing beatmatches yet.
+- **Structure detection assumes dance music.** It keys off bass dropping in and
+  out. On material without that shape — live recordings, ambient, most rock —
+  sections will be vague and the cues want checking by hand.
 - Genre is manual. Nothing detects genre reliably from audio.
 - Title and artist are parsed from the filename (`Artist - Title`), not ID3.
 - Analysis reads a 100 s window from 22% in, not the whole track. A track that

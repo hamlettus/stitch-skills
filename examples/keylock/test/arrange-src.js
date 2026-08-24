@@ -96,24 +96,30 @@
     });
   }
 
-  /** Mono mixdown of just the analysis window, so the big buffer can go. */
-  function extractWindow(buf) {
+  /**
+   * Full mono mixdown at the low analysis rate. Structure detection needs the
+   * whole track, not a slice — at 11kHz mono a six-minute track is ~16MB,
+   * still an eighth of what a full-rate decode would have cost.
+   */
+  function extractMono(buf) {
     var sr = buf.sampleRate;
     var total = buf.length;
-    var want = Math.min(Math.floor(WINDOW_SEC * sr), total);
-    var start = Math.floor(total * SKIP_FRAC);
-    if (start + want > total) start = Math.max(0, total - want);
-
-    var out = new Float32Array(want);
+    var out = new Float32Array(total);
     var chans = Math.min(buf.numberOfChannels, 2);
     for (var c = 0; c < chans; c++) {
       var data = buf.getChannelData(c);
-      for (var i = 0; i < want; i++) out[i] += data[start + i];
+      for (var i = 0; i < total; i++) out[i] += data[i];
     }
-    if (chans > 1) {
-      for (var j = 0; j < want; j++) out[j] /= chans;
-    }
+    if (chans > 1) for (var j = 0; j < total; j++) out[j] /= chans;
     return { samples: out, sampleRate: sr, durationSec: total / sr };
+  }
+
+  /** The stretch used for key and tempo: past the intro, capped in length. */
+  function keyWindow(samples, sr) {
+    var want = Math.min(Math.floor(WINDOW_SEC * sr), samples.length);
+    var start = Math.floor(samples.length * SKIP_FRAC);
+    if (start + want > samples.length) start = Math.max(0, samples.length - want);
+    return samples.subarray(start, start + want);
   }
 
   // ---- FFT (iterative radix-2) ----
@@ -354,6 +360,250 @@
   }
 
   // ============================================================
+  //  Structure — sections and cue points
+  //
+  //  In dance music the bass is the structural marker: it drops out for a
+  //  breakdown and slams back for the drop. Tracking a low band separately
+  //  from overall loudness segments a track far more reliably than energy
+  //  alone, which mostly just drifts.
+  // ============================================================
+
+  var FRAME_SEC = 0.25;
+  var SMOOTH_SEC = 4;
+  var MIN_SECTION_SEC = 8;
+
+  /** One-pole low-pass, used to isolate the sub/bass band. */
+  function lowpass(samples, sr, fc) {
+    var a = 1 - Math.exp(-2 * Math.PI * fc / sr);
+    var out = new Float32Array(samples.length);
+    var y = 0;
+    for (var i = 0; i < samples.length; i++) {
+      y += a * (samples[i] - y);
+      out[i] = y;
+    }
+    return out;
+  }
+
+  function movingAvg(arr, win) {
+    var n = arr.length, out = new Float32Array(n);
+    var half = Math.max(1, Math.floor(win / 2));
+    var sum = 0, count = 0, i;
+    for (i = 0; i < Math.min(half, n); i++) { sum += arr[i]; count++; }
+    for (i = 0; i < n; i++) {
+      var add = i + half, drop = i - half - 1;
+      if (add < n) { sum += arr[add]; count++; }
+      if (drop >= 0) { sum -= arr[drop]; count--; }
+      out[i] = count > 0 ? sum / count : 0;
+    }
+    return out;
+  }
+
+  function percentile(arr, p) {
+    var c = Array.prototype.slice.call(arr).sort(function (a, b) { return a - b; });
+    if (!c.length) return 0;
+    return c[Math.min(c.length - 1, Math.floor(c.length * p))];
+  }
+
+  /**
+   * Beat phase: the offset that best lines the beat grid up with the onsets.
+   * Cues snapped to this land on a downbeat instead of mid-bar.
+   */
+  function beatPhase(samples, sr, bpm) {
+    if (!bpm) return 0;
+    var period = 60 / bpm;
+    var hop = 256;
+    var frames = Math.floor(samples.length / hop);
+    if (frames < 32) return 0;
+
+    var env = new Float32Array(frames), i;
+    for (i = 0; i < frames; i++) {
+      var s = 0, off = i * hop;
+      for (var j = 0; j < hop; j++) { var v = samples[off + j]; s += v * v; }
+      env[i] = Math.sqrt(s / hop);
+    }
+    var odf = new Float32Array(frames);
+    for (i = 1; i < frames; i++) { var d = env[i] - env[i - 1]; odf[i] = d > 0 ? d : 0; }
+
+    var fps = sr / hop;
+    var steps = 24, best = 0, bestScore = -1;
+    for (var k = 0; k < steps; k++) {
+      var phase = (k / steps) * period;
+      var score = 0;
+      for (var t = phase; t < frames / fps; t += period) {
+        var fi = Math.round(t * fps);
+        if (fi >= 0 && fi < frames) score += odf[fi];
+      }
+      if (score > bestScore) { bestScore = score; best = phase; }
+    }
+    return best;
+  }
+
+  /** Snap a time to the nearest bar line (4 beats) on the detected grid. */
+  function snapToBar(tSec, bpm, phase) {
+    if (!bpm) return tSec;
+    var bar = (60 / bpm) * 4;
+    var n = Math.round((tSec - phase) / bar);
+    return Math.max(0, phase + n * bar);
+  }
+
+  /**
+   * Segment a track and pick the cue points a DJ actually needs:
+   * where it is safe to mix in, where to start mixing out, the drop, and
+   * the breakdown.
+   */
+  function analyseStructure(samples, sr, bpm) {
+    var dur = samples.length / sr;
+    var hop = Math.max(1, Math.round(sr * FRAME_SEC));
+    var n = Math.floor(samples.length / hop);
+    if (n < 8) return null;
+
+    var bassSig = lowpass(samples, sr, 180);
+    var rms = new Float32Array(n), bass = new Float32Array(n);
+    for (var f = 0; f < n; f++) {
+      var off = f * hop, sA = 0, sB = 0;
+      for (var i = 0; i < hop; i++) {
+        var a = samples[off + i]; sA += a * a;
+        var b = bassSig[off + i]; sB += b * b;
+      }
+      rms[f] = Math.sqrt(sA / hop);
+      bass[f] = Math.sqrt(sB / hop);
+    }
+    bassSig = null;
+
+    var win = Math.round(SMOOTH_SEC / FRAME_SEC);
+    var rmsS = movingAvg(rms, win);
+    var bassS = movingAvg(bass, win);
+
+    // Normalise against a high percentile so one loud transient can't skew it
+    var rMax = percentile(rmsS, 0.95) || 1;
+    var bMax = percentile(bassS, 0.95) || 1;
+    for (var k = 0; k < n; k++) {
+      rmsS[k] = Math.min(1, rmsS[k] / rMax);
+      bassS[k] = Math.min(1, bassS[k] / bMax);
+    }
+
+    // Two-state description per frame: bass present, and a coarse energy band
+    var state = new Int8Array(n);
+    for (var m = 0; m < n; m++) {
+      var hasBass = bassS[m] > 0.34 ? 1 : 0;
+      var band = rmsS[m] > 0.72 ? 2 : rmsS[m] > 0.38 ? 1 : 0;
+      state[m] = hasBass * 3 + band;
+    }
+
+    // Boundaries where the state changes and holds
+    var bounds = [0];
+    for (var p = 1; p < n; p++) {
+      if (state[p] !== state[p - 1]) bounds.push(p);
+    }
+    bounds.push(n);
+
+    var segs = [];
+    for (var q = 0; q < bounds.length - 1; q++) {
+      var a0 = bounds[q], a1 = bounds[q + 1];
+      if (a1 <= a0) continue;
+      var eSum = 0, bSum = 0;
+      for (var r = a0; r < a1; r++) { eSum += rmsS[r]; bSum += bassS[r]; }
+      segs.push({
+        startSec: a0 * FRAME_SEC,
+        endSec: a1 * FRAME_SEC,
+        energy: eSum / (a1 - a0),
+        bass: bSum / (a1 - a0)
+      });
+    }
+
+    // Merge anything too short to be a real section into its neighbour
+    var merged = [];
+    segs.forEach(function (s) {
+      var last = merged[merged.length - 1];
+      if (last && (s.endSec - s.startSec) < MIN_SECTION_SEC) {
+        var w1 = last.endSec - last.startSec, w2 = s.endSec - s.startSec;
+        last.energy = (last.energy * w1 + s.energy * w2) / (w1 + w2);
+        last.bass = (last.bass * w1 + s.bass * w2) / (w1 + w2);
+        last.endSec = s.endSec;
+      } else {
+        merged.push(s);
+      }
+    });
+    if (merged.length > 1 && (merged[0].endSec - merged[0].startSec) < MIN_SECTION_SEC) {
+      merged[1].startSec = merged[0].startSec;
+      merged.shift();
+    }
+
+    // Label
+    var peakE = 0;
+    merged.forEach(function (s) { peakE = Math.max(peakE, s.energy); });
+    merged.forEach(function (s, idx) {
+      var first = idx === 0, last = idx === merged.length - 1;
+      if (s.bass < 0.3) {
+        s.kind = first ? 'intro' : last ? 'outro' : 'breakdown';
+      } else if (s.energy >= peakE * 0.88) {
+        s.kind = 'drop';
+      } else if (first && s.energy < peakE * 0.6) {
+        s.kind = 'intro';
+      } else if (last && s.energy < peakE * 0.7) {
+        s.kind = 'outro';
+      } else {
+        s.kind = 'groove';
+      }
+    });
+
+    // ---- cues ----
+    var phase = beatPhase(samples, sr, bpm);
+
+    // Mix in: the first point with bass and real energy. Anything before it is
+    // intro, which is exactly the part you play under the outgoing track.
+    var mixIn = 0;
+    for (var x = 0; x < merged.length; x++) {
+      if (merged[x].bass >= 0.34 && merged[x].energy > 0.35) { mixIn = merged[x].startSec; break; }
+    }
+
+    // Mix out: the start of the closing outro, or a sensible tail if it just ends.
+    var mixOut = dur;
+    for (var y = merged.length - 1; y >= 0; y--) {
+      if (merged[y].kind === 'outro') { mixOut = merged[y].startSec; break; }
+    }
+    if (mixOut >= dur - 1) {
+      var tail = bpm ? (60 / bpm) * 32 : 45;      // 32 beats
+      mixOut = Math.max(mixIn + 30, dur - tail);
+    }
+    if (mixOut <= mixIn + 20) mixOut = Math.min(dur, mixIn + Math.max(30, dur * 0.5));
+
+    var cues = [];
+    merged.forEach(function (s) {
+      cues.push({ tSec: snapToBar(s.startSec, bpm, phase), kind: s.kind });
+    });
+
+    // Named highlights, useful on their own
+    var drop = null, bd = null, bdLen = 0;
+    merged.forEach(function (s, idx) {
+      if (s.kind === 'drop' && (drop === null || s.energy > drop.energy)) {
+        drop = { tSec: s.startSec, energy: s.energy };
+      }
+      if (s.kind === 'breakdown' && idx > 0 && idx < merged.length - 1) {
+        var len = s.endSec - s.startSec;
+        if (len > bdLen) { bdLen = len; bd = { tSec: s.startSec }; }
+      }
+    });
+
+    return {
+      sections: merged.map(function (s) {
+        return {
+          startSec: Math.round(s.startSec * 10) / 10,
+          endSec: Math.round(s.endSec * 10) / 10,
+          kind: s.kind,
+          energy: Math.round(s.energy * 100) / 100
+        };
+      }),
+      cues: cues,
+      mixInSec: Math.round(snapToBar(mixIn, bpm, phase) * 10) / 10,
+      mixOutSec: Math.round(snapToBar(mixOut, bpm, phase) * 10) / 10,
+      dropSec: drop ? Math.round(snapToBar(drop.tSec, bpm, phase) * 10) / 10 : null,
+      breakdownSec: bd ? Math.round(snapToBar(bd.tSec, bpm, phase) * 10) / 10 : null,
+      beatPhase: Math.round(phase * 1000) / 1000
+    };
+  }
+
+  // ============================================================
   //  Storage — metadata in localStorage, audio in IndexedDB
   //
   //  An arrangement is worthless if the audio vanishes on reload, and a
@@ -428,6 +678,8 @@
           key: t.key, keyAlt: t.keyAlt, confidence: t.confidence,
           bpm: t.bpm, energy: t.energy, filename: t.filename,
           sizeBytes: t.sizeBytes, durationSec: t.durationSec,
+          sections: t.sections, mixInSec: t.mixInSec, mixOutSec: t.mixOutSec,
+          dropSec: t.dropSec, breakdownSec: t.breakdownSec, beatPhase: t.beatPhase,
           peaks: t.peaks ? Array.from(t.peaks).map(function (p) { return Math.round(p * 255); }) : null
         };
       })));
@@ -561,15 +813,19 @@
     var buf = await decodeAudio(ctx, arr);
     arr = null;
 
-    var win = extractWindow(buf);
+    var win = extractMono(buf);
     buf = null;                      // release before analysis allocates
     await yieldUI();
 
     var samples = win.samples, sr = win.sampleRate;
-    var key = await detectKey(samples, sr);
-    var bpm = await detectBpm(samples, sr);
-    var energy = detectEnergy(samples);
+    var kw = keyWindow(samples, sr);
+
+    var key = await detectKey(kw, sr);
+    var bpm = await detectBpm(kw, sr);
+    var energy = detectEnergy(kw);
     var peaks = peaksFor(samples, 300);
+    await yieldUI();
+    var struct = analyseStructure(samples, sr, bpm);
 
     var nm = parseName(file.name);
     var id = newId();
@@ -583,7 +839,13 @@
       confidence: key ? key.confidence : 0,
       bpm: bpm, energy: energy,
       filename: file.name, sizeBytes: file.size,
-      durationSec: win.durationSec, peaks: peaks, error: null
+      durationSec: win.durationSec, peaks: peaks, error: null,
+      sections: struct ? struct.sections : null,
+      mixInSec: struct ? struct.mixInSec : null,
+      mixOutSec: struct ? struct.mixOutSec : null,
+      dropSec: struct ? struct.dropSec : null,
+      breakdownSec: struct ? struct.breakdownSec : null,
+      beatPhase: struct ? struct.beatPhase : 0
     });
   }
 
@@ -671,6 +933,232 @@
       g *= Math.sin((fromEnd / c.fadeOutSec) * Math.PI / 2);
     }
     return Math.max(0, Math.min(1, g));
+  }
+
+  // ============================================================
+  //  Auto-arrange
+  //
+  //  Orders the tracks so each transition is harmonically sound and the
+  //  tempo barely moves, shaped into an energy arc — build, peak, come
+  //  down — then places each clip so the incoming track's mix-in cue lands
+  //  on the outgoing track's mix-out cue.
+  // ============================================================
+
+  /** How well b follows a. Higher is better; harmonics dominate. */
+  function transitionScore(a, b, positionFrac) {
+    var s = 0;
+
+    var rel = relation(a.key, b.key);
+    if (rel.label === 'perfect') s += 3.0;
+    else if (rel.label === 'relative') s += 2.6;
+    else if (rel.label === '+1 energy') s += 2.8;
+    else if (rel.label === '−1 mood') s += 2.4;
+    else if (rel.label === '2 steps') s += 0.4;
+    else s -= 4.0;                                  // clash
+    if (!a.key || !b.key) s -= 0.5;                 // unknown: mildly discouraged
+
+    // Tempo: past ~6% is outside comfortable pitch range on most gear.
+    if (a.bpm && b.bpm) {
+      var pct = Math.abs((b.bpm - a.bpm) / a.bpm) * 100;
+      s -= pct * 0.45;
+      if (pct > 6) s -= 2.5;
+    } else {
+      s -= 0.4;
+    }
+
+    // Energy arc: climb through the first ~65%, ease off after.
+    if (a.energy && b.energy) {
+      var step = b.energy - a.energy;
+      var wantRising = positionFrac < 0.65;
+      if (wantRising) s += step >= 0 && step <= 2 ? 1.0 : step > 2 ? 0.1 : -0.5;
+      else s += step <= 0 && step >= -2 ? 0.9 : step < -2 ? 0.1 : -0.6;
+    }
+    return s;
+  }
+
+  var lastMisfits = [];
+  var ARC_WEIGHT = 3.2;
+
+  /**
+   * How closely the energy sequence traces a set: climb to a peak around
+   * two-thirds through, then come down. Scored across the whole chain rather
+   * than seam by seam, so it shapes the set instead of just each handover.
+   * Weighted below a clash — a bad key change is worse than a flat arc.
+   */
+  function arcScore(order) {
+    var n = order.length;
+    if (n < 3) return 0;
+    var es = order.map(function (x) { return x.energy || 5; });
+    var lo = Math.min.apply(null, es), hi = Math.max.apply(null, es);
+    if (hi === lo) return 0;
+
+    var err = 0;
+    for (var i = 0; i < n; i++) {
+      var frac = i / (n - 1);
+      var ideal = frac <= 0.68 ? (frac / 0.68) : 1 - ((frac - 0.68) / 0.32) * 0.7;
+      var actual = (es[i] - lo) / (hi - lo);
+      err += (actual - ideal) * (actual - ideal);
+    }
+    return ARC_WEIGHT * (1 - (err / n) * 2.2);
+  }
+
+  function chainTotal(order) {
+    var t = 0;
+    for (var i = 1; i < order.length; i++) {
+      t += transitionScore(order[i - 1], order[i], i / order.length);
+    }
+    return t + arcScore(order);
+  }
+
+  function greedyFrom(seed, pool) {
+    var remaining = pool.filter(function (x) { return x !== seed; });
+    var chain = [seed];
+    while (remaining.length) {
+      var frac = chain.length / pool.length;
+      var bestIdx = 0, bestScore = -Infinity;
+      for (var i = 0; i < remaining.length; i++) {
+        var sc = transitionScore(chain[chain.length - 1], remaining[i], frac);
+        if (sc > bestScore) { bestScore = sc; bestIdx = i; }
+      }
+      chain.push(remaining.splice(bestIdx, 1)[0]);
+    }
+    return chain;
+  }
+
+  function twoOpt(chain) {
+    var best = chain, bestT = chainTotal(chain), improved = true, guard = 0;
+    while (improved && guard++ < 5) {
+      improved = false;
+      for (var i = 0; i < best.length - 1; i++) {
+        for (var j = i + 1; j < best.length; j++) {
+          var cand = best.slice(0, i)
+            .concat(best.slice(i, j + 1).reverse())
+            .concat(best.slice(j + 1));
+          var t2 = chainTotal(cand);
+          if (t2 > bestT + 0.001) { best = cand; bestT = t2; improved = true; }
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Greedy is only as good as where it starts — anchored to one track it can
+   * strand a key with nowhere clean to go. So run it from several seeds and
+   * keep the best chain, then refine with 2-opt.
+   */
+  /**
+   * A track that can only be reached through a key clash *and* a tempo jump
+   * past pitch range does not belong in this set. Better to leave it out and
+   * say so than to bury a jarring transition in the middle of the mix.
+   */
+  function splitMisfits(pool) {
+    if (pool.length < 4) return { core: pool.slice(), misfits: [] };
+    var core = [], misfits = [];
+    pool.forEach(function (t) {
+      var reachable = pool.some(function (o) {
+        if (o === t) return false;
+        var okKey = relation(o.key, t.key).label !== 'clash';
+        var okBpm = !o.bpm || !t.bpm ||
+          Math.abs((t.bpm - o.bpm) / o.bpm) * 100 <= 6;
+        return okKey || okBpm;
+      });
+      (reachable ? core : misfits).push(t);
+    });
+    // Never strand the whole set on this rule.
+    if (core.length < 2) return { core: pool.slice(), misfits: [] };
+    return { core: core, misfits: misfits };
+  }
+
+  function orderTracks(pool) {
+    if (pool.length <= 2) return pool.slice();
+
+    var seeds;
+    if (pool.length <= 24) {
+      seeds = pool.slice();                       // small crate: try them all
+    } else {
+      seeds = pool.slice().sort(function (a, b) {
+        return (a.energy || 5) - (b.energy || 5);
+      }).slice(0, 8);                             // large crate: quiet starts only
+    }
+
+    var best = null, bestT = -Infinity;
+    seeds.forEach(function (seed) {
+      var chain = twoOpt(greedyFrom(seed, pool));
+      var t = chainTotal(chain);
+      if (t > bestT) { bestT = t; best = chain; }
+    });
+    return best || pool.slice();
+  }
+
+  /** Crossfade length for a pair, in seconds, rounded to whole bars. */
+  function crossfadeFor(a, b) {
+    var bpm = (a && a.bpm) || (b && b.bpm) || 124;
+    var bar = (60 / bpm) * 4;
+    var bars = 16;
+    var rel = relation(a && a.key, b && b.key);
+    if (rel.label === 'clash') bars = 4;            // get out fast
+    else if (rel.label === '2 steps') bars = 8;
+    return Math.max(4, Math.min(48, bar * bars));
+  }
+
+  function autoArrange() {
+    var pool = tracks.filter(function (t) { return blobs[t.id] && t.durationSec; });
+    if (pool.length < 2) { flash('Add at least two analysed tracks first'); return; }
+    if (clips.length && !confirm('Replace the current arrangement with an auto-built one?')) return;
+
+    stopPlayback(false);
+    var split = splitMisfits(pool);
+    var order = orderTracks(split.core);
+    lastMisfits = split.misfits;
+
+    clips = [];
+    var cursor = 0;
+    for (var i = 0; i < order.length; i++) {
+      var t = order[i];
+      var inSec = (t.mixInSec != null) ? t.mixInSec : 0;
+      var outSec = (t.mixOutSec != null) ? t.mixOutSec : t.durationSec;
+      if (outSec <= inSec) { inSec = 0; outSec = t.durationSec; }
+
+      var prev = order[i - 1];
+      var xfIn = i === 0 ? 0 : crossfadeFor(prev, t);
+      var xfOut = i === order.length - 1
+        ? Math.min(12, (outSec - inSec) * 0.25)
+        : crossfadeFor(t, order[i + 1]);
+
+      // Play from the mix-in cue, but start early enough that the incoming
+      // fade is over by the time the cue itself lands.
+      var lead = Math.min(xfIn, inSec);
+      var offset = inSec - lead;
+      var length = (outSec - offset) + xfOut;
+      length = Math.min(length, t.durationSec - offset);
+      if (length < 20) { offset = 0; length = Math.min(t.durationSec, 120); }
+
+      var start = i === 0 ? 0 : Math.max(0, cursor - xfIn);
+      clips.push({
+        id: newId(),
+        trackId: t.id,
+        startSec: Math.round(start * 100) / 100,
+        offsetSec: Math.round(offset * 100) / 100,
+        lengthSec: Math.round(length * 100) / 100,
+        fadeInSec: Math.round(Math.min(xfIn, length * 0.5) * 100) / 100,
+        fadeOutSec: Math.round(Math.min(xfOut, length * 0.5) * 100) / 100,
+        gain: 1,
+        auto: true
+      });
+      cursor = start + length;
+    }
+
+    selectedClipId = null;
+    renderAll();
+    save();
+    selectTab('arrange');
+    var msg = 'Arranged ' + order.length + ' tracks · ' + fmtTime(arrangementEnd());
+    if (lastMisfits.length) {
+      msg += ' · left out ' + lastMisfits.length +
+        (lastMisfits.length === 1 ? ' misfit' : ' misfits');
+    }
+    flash(msg);
   }
 
   // ============================================================
@@ -890,23 +1378,100 @@
     pausePlayback();
   }
 
+  var bouncedBlob = null;
+
   function showBounced(blob) {
+    bouncedBlob = blob;
     var dlg = document.getElementById('bounced');
     var au = document.getElementById('b-audio');
-    var link = document.getElementById('b-save');
-    var url = URL.createObjectURL(blob);
-    au.src = url;
-    link.href = url;
-    var ext = (blob.type.indexOf('mp4') !== -1) ? 'm4a' : 'webm';
-    link.download = 'keylock-mix.' + ext;
+    au.src = URL.createObjectURL(blob);
+
+    var mb = blob.size / 1048576;
     document.getElementById('b-info').textContent =
-      fmtTime(arrangementEnd()) + '  ·  ' + (blob.size / 1048576).toFixed(1) + ' MB  ·  ' + blob.type;
-    document.getElementById('b-note').textContent =
-      'Play it back above to check the transitions. If Save file does nothing, the page is running ' +
-      'in a sandboxed viewer that blocks downloads — open keylock.html directly in Safari and bounce ' +
-      'there to keep the file.';
+      fmtTime(arrangementEnd()) + '  ·  ' + mb.toFixed(1) + ' MB  ·  ' + blob.type;
+
+    var note = document.getElementById('b-note');
+    note.className = 'note';
+    if (mb > 16) {
+      note.className = 'note warn';
+      note.textContent = 'This mix is ' + mb.toFixed(1) + ' MB. Saving from inside the Claude viewer ' +
+        'is capped at 16 MB — it will refuse. To keep a mix this long, open keylock.html directly in ' +
+        'Safari and bounce there. You can still audition it above.';
+    } else {
+      note.textContent = 'Have a listen through the transitions before you keep it.';
+    }
     dlg.showModal();
   }
+
+  /** Extension has to be one the viewer allows: mp4 and webm are, m4a is not. */
+  function bounceFilename(blob) {
+    var ext = blob.type.indexOf('webm') !== -1 ? 'webm' : 'mp4';
+    var d = new Date();
+    var stamp = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') +
+      String(d.getDate()).padStart(2, '0') + '-' +
+      String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
+    return 'keylock-mix-' + stamp + '.' + ext;
+  }
+
+  document.getElementById('b-save').addEventListener('click', async function () {
+    if (!bouncedBlob) return;
+    var btn = this;
+    var name = bounceFilename(bouncedBlob);
+    var note = document.getElementById('b-note');
+
+    // Inside the Claude viewer the host mediates the save; opened as a plain
+    // file it does not exist, and an anchor works.
+    var downloads = null;
+    if (window.claude && typeof window.claude.use === 'function') {
+      try { downloads = await window.claude.use('downloads'); } catch (e) { downloads = null; }
+    }
+
+    if (!downloads) {
+      try {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(bouncedBlob);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () {
+          URL.revokeObjectURL(a.href);
+          a.remove();
+        }, 1000);
+      } catch (e) {
+        note.className = 'note warn';
+        note.textContent = 'This browser would not take the file. Long-press the player above to save it instead.';
+      }
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await downloads.save({ filename: name, data: bouncedBlob });
+      btn.textContent = 'Saved';
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Save file';
+      note.className = 'note warn';
+      var code = err && err.code;
+      if (code === 'declined') {
+        note.textContent = 'Save cancelled.';
+        note.className = 'note';
+      } else if (code === 'too_large') {
+        note.textContent = 'Too big to save from here — the limit is 16 MB and this mix is ' +
+          (bouncedBlob.size / 1048576).toFixed(1) + ' MB. Open keylock.html directly in Safari and ' +
+          'bounce there, or bounce a shorter stretch.';
+      } else if (code === 'rate_limited') {
+        note.textContent = 'A save prompt is already open. Finish that one, then try again.';
+      } else if (code === 'rejected_extension' || code === 'extension_not_enabled') {
+        note.textContent = 'This viewer will not accept a ' + name.split('.').pop() +
+          ' file. Open keylock.html directly in Safari to keep the bounce.';
+      } else {
+        note.textContent = 'Could not save here. You can still audition the mix above, or open ' +
+          'keylock.html directly in Safari and bounce there.';
+      }
+    }
+  });
 
   document.getElementById('b-close').addEventListener('click', function () {
     document.getElementById('bounced').close();
@@ -990,8 +1555,22 @@
     if (!clips.length) {
       var e = document.createElement('div');
       e.className = 'empty';
-      e.innerHTML = '<b>Nothing arranged yet</b><p>Go to Library and tap → on a track to drop it on the timeline. Each one lands crossfaded into the last.</p>';
+      e.innerHTML = '<b>Nothing arranged yet</b><p>Tap <b>Auto-arrange</b> to have Keylock order your tracks and cut them cue to cue — or add them one at a time with → in the Library.</p>';
       el.arrEmpty.appendChild(e);
+    } else if (lastMisfits.length) {
+      var m = document.createElement('div');
+      m.className = 'empty';
+      m.style.borderColor = 'var(--warn)';
+      var names = lastMisfits.map(function (t) {
+        return (t.title || t.filename) + ' (' + (t.key || '?') + ' · ' +
+          (t.bpm ? t.bpm.toFixed(0) : '?') + ')';
+      }).join(', ');
+      m.innerHTML = '<b>Left out of the auto-arrangement</b><p>' + names +
+        '<br>Nothing in the set reaches ' + (lastMisfits.length === 1 ? 'it' : 'them') +
+        ' without both a key clash and a tempo jump past pitch range. Add ' +
+        (lastMisfits.length === 1 ? 'it' : 'them') + ' by hand from the Library if you want ' +
+        (lastMisfits.length === 1 ? 'it' : 'them') + ' anyway.</p>';
+      el.arrEmpty.appendChild(m);
     }
   }
 
@@ -1040,6 +1619,21 @@
     var g = cv.getContext('2d');
     g.scale(dpr, dpr);
     g.clearRect(0, 0, w, h);
+
+    // section tint for the stretch this clip covers
+    if (t && t.sections && t.durationSec) {
+      t.sections.forEach(function (sec) {
+        var a = Math.max(sec.startSec, c.offsetSec);
+        var b = Math.min(sec.endSec, c.offsetSec + c.lengthSec);
+        if (b <= a) return;
+        var x0 = ((a - c.offsetSec) / c.lengthSec) * w;
+        var x1 = ((b - c.offsetSec) / c.lengthSec) * w;
+        g.fillStyle = SECTION_COLOR[sec.kind] || '#3A4050';
+        g.globalAlpha = 0.34;
+        g.fillRect(x0, 0, Math.max(1, x1 - x0), h);
+        g.globalAlpha = 1;
+      });
+    }
 
     // waveform slice
     if (t && t.peaks && t.peaks.length && t.durationSec) {
@@ -1408,21 +2002,92 @@
     } else {
       note.textContent = 'No key detected. Set it by hand and the arrangement will use it.';
     }
+    renderCues(t);
     drawWave(t);
     el.detail.showModal();
+  }
+
+  var SECTION_COLOR = {
+    intro:     '#4A5470',
+    groove:    '#3D8FB5',
+    build:     '#C99A3A',
+    drop:      '#D9544F',
+    breakdown: '#6E5BA6',
+    outro:     '#41545E'
+  };
+
+  function renderCues(t) {
+    var legend = document.getElementById('d-legend');
+    var cues = document.getElementById('d-cues');
+    legend.textContent = '';
+    cues.textContent = '';
+    if (!t.sections) return;
+
+    var kinds = [];
+    t.sections.forEach(function (s) { if (kinds.indexOf(s.kind) === -1) kinds.push(s.kind); });
+    kinds.forEach(function (k) {
+      var span = document.createElement('span');
+      var sw = document.createElement('i');
+      sw.style.background = SECTION_COLOR[k] || '#3A4050';
+      span.appendChild(sw);
+      span.appendChild(document.createTextNode(k));
+      legend.appendChild(span);
+    });
+
+    [['Mix in', t.mixInSec], ['Mix out', t.mixOutSec],
+     ['Drop', t.dropSec], ['Breakdown', t.breakdownSec]].forEach(function (pair) {
+      if (pair[1] == null) return;
+      var d = document.createElement('div');
+      var lab = document.createElement('span');
+      lab.textContent = pair[0] + ' ';
+      var v = document.createElement('b');
+      v.textContent = fmtTime(pair[1]);
+      d.appendChild(lab); d.appendChild(v);
+      cues.appendChild(d);
+    });
   }
 
   function drawWave(t) {
     var cv = document.getElementById('detail-wave');
     var g = cv.getContext('2d');
-    g.clearRect(0, 0, cv.width, cv.height);
-    if (!t.peaks || !t.peaks.length) return;
-    var n = t.peaks.length, bw = cv.width / n;
-    g.fillStyle = t.key ? keyColor(t.key) : '#3A4050';
-    for (var i = 0; i < n; i++) {
-      var bh = Math.max(2, Math.pow(t.peaks[i], 0.7) * cv.height * 0.92);
-      g.fillRect(i * bw, (cv.height - bh) / 2, Math.max(1, bw - 1), bh);
+    var W = cv.width, H = cv.height;
+    g.clearRect(0, 0, W, H);
+    if (!t.durationSec) return;
+
+    // section bands behind the waveform
+    if (t.sections) {
+      t.sections.forEach(function (sec) {
+        var x0 = (sec.startSec / t.durationSec) * W;
+        var x1 = (sec.endSec / t.durationSec) * W;
+        g.fillStyle = (SECTION_COLOR[sec.kind] || '#3A4050');
+        g.globalAlpha = 0.30;
+        g.fillRect(x0, 0, Math.max(1, x1 - x0), H);
+        g.globalAlpha = 1;
+      });
     }
+
+    if (t.peaks && t.peaks.length) {
+      var n = t.peaks.length, bw = W / n;
+      g.fillStyle = t.key ? keyColor(t.key) : '#3A4050';
+      for (var i = 0; i < n; i++) {
+        var bh = Math.max(2, Math.pow(t.peaks[i], 0.7) * H * 0.86);
+        g.fillRect(i * bw, (H - bh) / 2, Math.max(1, bw - 1), bh);
+      }
+    }
+
+    // cue markers
+    function mark(tSec, color, glyph) {
+      if (tSec == null) return;
+      var x = (tSec / t.durationSec) * W;
+      g.strokeStyle = color; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+      g.fillStyle = color;
+      g.font = 'bold 13px ui-monospace, monospace';
+      g.fillText(glyph, Math.min(W - 16, x + 3), 13);
+    }
+    mark(t.mixInSec, '#4ADE80', 'IN');
+    mark(t.mixOutSec, '#F87171', 'OUT');
+    mark(t.dropSec, '#FBBF24', '▼');
   }
 
   document.getElementById('detail-form').addEventListener('submit', function (ev) {
@@ -1481,6 +2146,7 @@
   });
   document.getElementById('a-stop').addEventListener('click', function () { stopPlayback(false); });
   el.bounceBtn.addEventListener('click', function () { bounce(); });
+  document.getElementById('a-auto').addEventListener('click', function () { autoArrange(); });
 
   el.zoom.addEventListener('input', function () {
     pxPerSec = parseFloat(el.zoom.value);
