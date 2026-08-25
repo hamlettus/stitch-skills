@@ -80,3 +80,5 @@ console.log('  arrangementEnd =', arrangementEnd().toFixed(1)+'s',
 if (Math.abs(arrangementEnd()-716) > 0.5) ok=false;
 
 console.log('\n' + (ok ? '  ALL ARRANGEMENT CHECKS PASS' : '  FAILURES ABOVE'));
+
+if (!ok) process.exitCode = 1;

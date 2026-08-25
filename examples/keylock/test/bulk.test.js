@@ -91,3 +91,5 @@ console.log('  '+(cft?'PASS':'FAIL'),'clipsForTrack("t2") -> '+clipsForTrack('t2
 
 console.log('\n  total '+arrangementEnd().toFixed(0)+'s');
 console.log('  '+(ok?'ALL BULK-ADD CHECKS PASS':'FAILURES ABOVE'));
+
+if (!ok) process.exitCode = 1;

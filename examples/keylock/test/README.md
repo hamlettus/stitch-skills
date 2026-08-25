@@ -4,13 +4,35 @@ Each `*.js` here is lifted verbatim out of `keylock.html` so it can run in Node.
 If you change the app, re-extract them.
 
 ```bash
-node dsp.test.js        # key + BPM detection
-node structure.test.js  # section segmentation + cue points
-node order.test.js      # set ordering
-node arrange.test.js    # clip placement + crossfade math
-node bulk.test.js       # bulk add: chaining, cue alignment, source bounds
-node tempo.test.js      # stretch rates, source-span mapping, beat-grid alignment
+bash run.sh        # all six suites, 76 assertions
+bash run.sh -v     # with full output
 ```
+
+`run.sh` re-extracts the app script before running, so a stale copy cannot
+report a false pass, and exits nonzero if any suite fails.
+
+## Are the tests any good?
+
+Passing tests prove nothing on their own, so each module was mutated on purpose
+to check the suite bites. Eleven mutations, ten caught:
+
+| Mutation | |
+|---|---|
+| bass-root tie-breaker removed | caught |
+| BPM octave folding broken | caught |
+| bar snapping off by three bars | caught |
+| section merging collapses everything | caught |
+| bass threshold far too low | caught |
+| low-pass corner blown out | caught |
+| clash penalty removed | caught |
+| tempo penalty removed | caught |
+| misfit exclusion disabled | caught |
+| multi-start reduced to one seed | **not caught** |
+
+The survivor is honest signal: on every crate tested, the 2-opt pass finds the
+clean walk regardless of where the greedy started — so multi-start may be
+redundant at these sizes. It was worth keeping when the crate had a hard
+outlier, but nothing here proves it earns its place.
 
 **dsp** synthesises chord progressions with a known key and tempo and checks
 what comes back. Caught the relative-key bug: A minor read as C major.

@@ -39,7 +39,8 @@ Run the checks with `node test/dsp.test.js`.
 
 Overall loudness mostly drifts — it does not tell you where a track changes.
 The bass does: it drops out for a breakdown and slams back for the drop. So
-structure detection low-passes at 180 Hz and tracks that band separately, then
+structure detection low-passes at 140 Hz (three cascaded poles, 18 dB/octave)
+and tracks that band separately, then
 segments where the bass-present / energy-band state changes and holds. On a
 synthetic track with a known arrangement it recovers all six sections with
 boundaries inside a second or two.
@@ -160,6 +161,10 @@ minutes to bounce, with the screen open.
 - **Structure detection assumes dance music.** It keys off bass dropping in and
   out. On material without that shape — live recordings, ambient, most rock —
   sections will be vague and the cues want checking by hand.
+- **Tempo detection needs beat-level movement.** The autocorrelation searches
+  60–200 BPM, so periods longer than a second are invisible to it. A track with
+  nothing but a downbeat kick — no hats, no offbeats — reports noise. Half-time
+  patterns are fine; genuinely empty bars are not.
 - Genre is manual. Nothing detects genre reliably from audio.
 - Title and artist are parsed from the filename (`Artist - Title`), not ID3.
 - Analysis reads a 100 s window from 22% in, not the whole track. A track that

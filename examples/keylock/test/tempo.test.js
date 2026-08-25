@@ -99,3 +99,5 @@ check(medianBpm([{bpm:null},{bpm:130}])===130,'ignores missing BPM');
 check(medianBpm([])===null,'null on empty');
 
 console.log('\n  '+(ok?'ALL TEMPO CHECKS PASS':'FAILURES ABOVE'));
+
+if (!ok) process.exitCode = 1;

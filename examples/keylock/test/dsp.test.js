@@ -14,11 +14,12 @@ function addKick(buf,at){
   for(let i=0;i<n;i++){ const x=s0+i; if(x>=buf.length)break; const t=i/RATE;
     buf[x]+=Math.sin(2*Math.PI*(110*Math.exp(-t*38)+45)*t)*Math.exp(-t*24)*0.95; }
 }
-function build(prog,bpm){
+function build(prog,bpm,pedal){
   const buf=new Float32Array(DUR*RATE), beat=60/bpm, bar=beat*4;
   for(let b=0;b*bar<DUR;b++){ const ch=prog[b%prog.length];
     ch.forEach(m=>addNote(buf,m,b*bar,bar,0.30));
-    addNote(buf,ch[0]-12,b*bar,bar,0.42); }   // bass root
+    // Either each chord's own root in the bass, or a fixed pedal note.
+    addNote(buf, pedal!==undefined ? pedal : ch[0]-12, b*bar, bar, 0.46); }
   for(let k=0;k*beat<DUR;k++) addKick(buf,k*beat);
   return buf;
 }
@@ -41,10 +42,16 @@ const cases = [
     prog:[[57,60,64],[53,57,60],[48,52,55],[55,59,62]] },
 ];
 
+// Same chords, but an A pedal in the bass. Note content alone cannot separate
+// A minor from C major here — only the root does. This is the case the
+// bass-weighting term exists for; without it the answer flips to 8B.
+const PEDAL = { name:'Am-F-C-G over an A pedal', bpm:126, want:'8A', pedal:57-24,
+  prog:[[57,60,64],[53,57,60],[48,52,55],[55,59,62]] };
+
 (async()=>{
   let pass=0;
   for (const c of cases){
-    const buf = build(c.prog, c.bpm);
+    const buf = build(c.prog, c.bpm, c.pedal);
     const k = await detectKey(buf, RATE);
     const b = await detectBpm(buf, RATE);
     const got = k?k.code:'null';
@@ -59,4 +66,44 @@ const cases = [
     );
   }
   console.log('\n  key: '+pass+'/'+cases.length+' correct');
+  if (pass !== cases.length) process.exitCode = 1;
+
+  // The bass-root case, reported separately because it isolates one mechanism.
+  console.log('\n--- bass root decides the relative pair ---');
+  const pk = await detectKey(build(PEDAL.prog, PEDAL.bpm, PEDAL.pedal), RATE);
+  const got = pk ? pk.code : 'null';
+  const good = got === PEDAL.want;
+  console.log('  '+(good?'PASS':'FAIL')+' reads as '+got+', want '+PEDAL.want+
+    '   ('+PEDAL.name+')');
+  // The pedal also feeds the main chroma, so the answer can land on 8A without
+  // the bass term — but only marginally, and it gets flagged as a coin-flip.
+  // A confident call is what the bass weighting actually buys.
+  const confident = pk && !pk.relativeTie;
+  console.log('  '+(confident?'PASS':'FAIL')+' called confidently, not flagged as a relative tie');
+  console.log('  Identical notes to the ambiguous case above — only the pedal in');
+  console.log('  the bass separates A minor from C major, and only the bass-root');
+  console.log('  term makes that separation decisive.');
+  if (!good || !confident) process.exitCode = 1;
+
+  // Half-time feel: kick on 1 and 3 rather than every beat, offbeat hats.
+  // The strongest periodicity is now two beats, so the reading can land an
+  // octave down — folding is what returns something a DJ can read.
+  console.log('\n--- half-time pattern ---');
+  const SP_BPM = 140, spBeat = 60/SP_BPM;
+  const sp = new Float32Array(DUR*RATE);
+  for (let k=0; k*spBeat<DUR; k++){
+    if (k % 2 === 0) addKick(sp, k*spBeat, 1.0);     // beats 1 and 3
+    else addNote(sp, 69, k*spBeat, spBeat*0.4, 0.16); // light offbeat
+  }
+  for (let b=0; b*spBeat*4<DUR; b++) addNote(sp, 45, b*spBeat*4, spBeat*4, 0.30);
+  const spOut = await detectBpm(sp, RATE);
+  const inRange = spOut !== null && spOut >= 70 && spOut <= 180;
+  // Either the beat rate or the half-time rate is a defensible reading; both
+  // must come back inside the usable range rather than as 35 or 280.
+  const musical = inRange && [SP_BPM, SP_BPM/2].some(function (v) {
+    return Math.abs(spOut - v) < 4;
+  });
+  console.log('  '+(inRange?'PASS':'FAIL')+' reported '+spOut+' BPM, inside the readable 70-180 range');
+  console.log('  '+(musical?'PASS':'FAIL')+' and either '+SP_BPM+' or its half-time '+(SP_BPM/2));
+  if (!inRange || !musical) process.exitCode = 1;
 })();

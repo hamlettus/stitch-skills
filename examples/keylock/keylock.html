@@ -928,14 +928,24 @@
   var SMOOTH_SEC = 4;
   var MIN_SECTION_SEC = 8;
 
-  /** One-pole low-pass, used to isolate the sub/bass band. */
-  function lowpass(samples, sr, fc) {
+  /**
+   * Cascaded one-pole low-pass. One stage rolls off at only 6dB/octave, which
+   * leaks so much low-mid that a loud pad reads as bass and a breakdown with
+   * energy in it goes undetected. Three stages give 18dB/octave — enough to
+   * separate a kick's fundamental from everything above it.
+   */
+  function lowpass(samples, sr, fc, stages) {
     var a = 1 - Math.exp(-2 * Math.PI * fc / sr);
-    var out = new Float32Array(samples.length);
-    var y = 0;
-    for (var i = 0; i < samples.length; i++) {
-      y += a * (samples[i] - y);
-      out[i] = y;
+    var n = samples.length;
+    var out = new Float32Array(n);
+    out.set(samples);
+    var passes = stages || 3;
+    for (var p = 0; p < passes; p++) {
+      var y = 0;
+      for (var i = 0; i < n; i++) {
+        y += a * (out[i] - y);
+        out[i] = y;
+      }
     }
     return out;
   }
@@ -1013,7 +1023,7 @@
     var n = Math.floor(samples.length / hop);
     if (n < 8) return null;
 
-    var bassSig = lowpass(samples, sr, 180);
+    var bassSig = lowpass(samples, sr, 140, 3);
     var rms = new Float32Array(n), bass = new Float32Array(n);
     for (var f = 0; f < n; f++) {
       var off = f * hop, sA = 0, sB = 0;

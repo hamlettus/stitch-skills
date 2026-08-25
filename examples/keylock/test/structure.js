@@ -4,13 +4,18 @@ var SMOOTH_SEC = 4;
 
 var MIN_SECTION_SEC = 8;
 
-function lowpass(samples, sr, fc) {
+function lowpass(samples, sr, fc, stages) {
     var a = 1 - Math.exp(-2 * Math.PI * fc / sr);
-    var out = new Float32Array(samples.length);
-    var y = 0;
-    for (var i = 0; i < samples.length; i++) {
-      y += a * (samples[i] - y);
-      out[i] = y;
+    var n = samples.length;
+    var out = new Float32Array(n);
+    out.set(samples);
+    var passes = stages || 3;
+    for (var p = 0; p < passes; p++) {
+      var y = 0;
+      for (var i = 0; i < n; i++) {
+        y += a * (out[i] - y);
+        out[i] = y;
+      }
     }
     return out;
   }
@@ -78,7 +83,7 @@ function analyseStructure(samples, sr, bpm) {
     var n = Math.floor(samples.length / hop);
     if (n < 8) return null;
 
-    var bassSig = lowpass(samples, sr, 180);
+    var bassSig = lowpass(samples, sr, 140, 3);
     var rms = new Float32Array(n), bass = new Float32Array(n);
     for (var f = 0; f < n; f++) {
       var off = f * hop, sA = 0, sB = 0;
